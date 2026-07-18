@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The session dashboard: cc-session-explorer as an always-on per-user LaunchAgent.
+  Logs: tail -f ~/Library/Logs/cc-session-explorer/dashboard.log
+
+  Unlike the Linux systemd unit, this does NOT socket-activate. launchd has no
+  LISTEN_FDS-style environment-variable protocol a plain Python process can read;
+  true parity would mean the app calling launch_activate_socket() (a C API) via
+  ctypes, which is not verifiable from this install path, so this runs the
+  dashboard always-on instead. The app already handles that gracefully: when
+  no systemd socket env vars are present it just calls uvicorn.run() directly
+  (see webapp.py's main()), so this is a supported, tested code path, just
+  without the idle-exit memory saving the Linux socket unit gets for free.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.cc-session-explorer.dashboard</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>@PLUGIN_ROOT@/.venv/bin/cc-session-explorer</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ThrottleInterval</key>
+	<integer>5</integer>
+	<key>Nice</key>
+	<integer>10</integer>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>StandardOutPath</key>
+	<string>@HOME@/Library/Logs/cc-session-explorer/dashboard.log</string>
+	<key>StandardErrorPath</key>
+	<string>@HOME@/Library/Logs/cc-session-explorer/dashboard.log</string>
+</dict>
+</plist>

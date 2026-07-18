@@ -1,0 +1,11 @@
+{
+  "name": "cc-session-explorer",
+  "version": "0.1.0",
+  "description": "FastAPI dashboard + MCP tools over cc-session-core: cost/usage views, context-window replay, ledger, and live session tracking.",
+  "author": {
+    "name": "Magic-Man"
+  },
+  "dependencies": {
+    "cc-session-core": ">=0.1.0"
+  }
+}

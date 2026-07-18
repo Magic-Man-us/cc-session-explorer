@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Idempotent: installs this plugin's bundled launchd LaunchAgents, then loads them. Safe to
+# run on every plugin load.
+#
+# Unlike the Linux systemd unit, the dashboard here runs always-on rather than
+# socket-activated -- see the comment in launchd/com.cc-session-explorer.dashboard.plist for
+# why. Both LaunchAgents are installed the same simple way as a result: no separate
+# socket-vs-service split to manage.
+set -euo pipefail
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+AGENT_DIR="$HOME/Library/LaunchAgents"
+LOG_DIR="$HOME/Library/Logs/cc-session-explorer"
+UID_DOMAIN="gui/$(id -u)"
+UNITS=(com.cc-session-explorer.dashboard.plist com.cc-session-explorer.watch.plist)
+
+mkdir -p "$AGENT_DIR" "$LOG_DIR"
+
+label_of() { local base="${1##*/}"; echo "${base%.plist}"; }
+
+is_loaded() { launchctl list "$(label_of "$1")" >/dev/null 2>&1; }
+
+# Compare contents rather than mere existence, same reasoning as the Linux script: a plist
+# edited upstream -- a changed binary path, say -- has to reach installs that already carry
+# an older rendered copy of it. Compare the *rendered* unit, not the source file verbatim:
+# the source carries @PLUGIN_ROOT@/@HOME@ placeholders that can't be literal paths in
+# version control.
+reload_needed=()
+for unit in "${UNITS[@]}"; do
+  rendered="$AGENT_DIR/.$unit.new"
+  sed -e "s|@PLUGIN_ROOT@|$PLUGIN_ROOT|g" -e "s|@HOME@|$HOME|g" \
+    "$PLUGIN_ROOT/launchd/$unit" > "$rendered"
+  if ! cmp -s "$rendered" "$AGENT_DIR/$unit" 2>/dev/null; then
+    mv "$rendered" "$AGENT_DIR/$unit"
+    reload_needed+=("$unit")
+  else
+    rm -f "$rendered"
+  fi
+done
+
+# A changed plist's already-running instance keeps its old config until reloaded -- bootout
+# then re-bootstrap to pick it up, matching the Linux script's "stop before reinstalling" step.
+for unit in "${reload_needed[@]:-}"; do
+  [ -z "$unit" ] && continue
+  if is_loaded "$unit"; then
+    launchctl bootout "$UID_DOMAIN/$(label_of "$unit")" 2>/dev/null || true
+  fi
+done
+
+for unit in "${UNITS[@]}"; do
+  if ! is_loaded "$unit"; then
+    launchctl bootstrap "$UID_DOMAIN" "$AGENT_DIR/$unit" 2>/dev/null || true
+  fi
+  launchctl enable "$UID_DOMAIN/$(label_of "$unit")" 2>/dev/null || true
+done
+
+# Confirm the dashboard actually ended up loaded -- bootstrap can report success from the
+# CLI even when the job itself immediately failed (e.g. the port was already taken).
+sleep 1
+if ! is_loaded com.cc-session-explorer.dashboard.plist; then
+  {
+    echo "cc-session-explorer: the dashboard LaunchAgent did not stay loaded."
+    echo "Check the log: $LOG_DIR/dashboard.log"
+    echo "The transcript watcher is installed independently and is unaffected."
+  } >&2
+fi

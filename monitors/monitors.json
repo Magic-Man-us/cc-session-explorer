@@ -1,0 +1,14 @@
+[
+  {
+    "name": "dashboard-uptime",
+    "command": "${CLAUDE_PLUGIN_ROOT}/bin/cc-session-explorer-healthcheck",
+    "description": "Starts the dashboard if it isn't already running, then reports only up/down transitions.",
+    "when": "always"
+  },
+  {
+    "name": "live-transcript-tail",
+    "command": "${CLAUDE_PLUGIN_ROOT}/bin/cc-session-explorer-watch-tail",
+    "description": "Live feed of transcript ingestion: cc-session-watch logs each batch of new records as it captures session activity.",
+    "when": "always"
+  }
+]

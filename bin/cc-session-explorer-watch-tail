@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Live feed of transcript ingestion, OS-appropriate: journalctl on Linux, the LaunchAgent's
+# redirected log file on macOS (see launchd/com.cc-session-explorer.watch.plist).
+set -euo pipefail
+
+case "$(uname -s)" in
+  Linux)
+    exec journalctl --user -u cc-session-watch -f
+    ;;
+  Darwin)
+    LOG="$HOME/Library/Logs/cc-session-explorer/watch.log"
+    mkdir -p "$(dirname "$LOG")"
+    touch "$LOG"
+    exec tail -f "$LOG"
+    ;;
+  *)
+    echo "cc-session-explorer: no log-tail integration for $(uname -s)." >&2
+    exit 1
+    ;;
+esac

@@ -1,0 +1,41 @@
+# Live transcript capture: cc-session-watch as a systemd user service.
+# Install: bin/cc-session-explorer-startup (renders @PLUGIN_ROOT@ below to this install's
+# actual directory and installs it -- a raw `cp` leaves that placeholder unresolved).
+# Logs:    journalctl --user -u cc-session-watch -f
+
+[Unit]
+Description=Claude Code transcript watcher (live ingest into ~/.cc-session-explorer/transcripts.db)
+# Crash-loop backstop: 5 restarts in 60s trips 'failed' instead of restarting forever.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+ExecStart=@PLUGIN_ROOT@/.venv/bin/cc-session-watch
+Restart=always
+RestartSec=5
+# Bulk catch-up after a long absence shouldn't compete with interactive work.
+Nice=10
+IOSchedulingClass=idle
+# Backstop: reclaim past 512M, hard-kill past 1G (a healthy watcher sits near 100M).
+MemoryHigh=512M
+MemoryMax=1G
+
+# Hardening. Reads ~/.claude/projects, reads+writes ~/.cc-session-explorer (SQLite WAL needs
+# the dir writable even for -wal/-shm); nothing else on disk, no network.
+# Namespace/seccomp-based only — capability-dropping directives (ProtectKernel*,
+# ProtectClock) need CAP_SETPCAP the --user manager lacks and fail with 218.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.cc-session-explorer
+PrivateTmp=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+
+[Install]
+WantedBy=default.target

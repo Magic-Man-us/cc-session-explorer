@@ -1,0 +1,41 @@
+# The session dashboard: cc-session-explorer as a socket-activated systemd user service.
+# Started on demand by cc-session-explorer.socket — see that unit for the install steps.
+# Logs: journalctl --user -u cc-session-explorer -f
+
+[Unit]
+Description=cc-session-explorer dashboard (SPA + /api + /timeline on 127.0.0.1:9821)
+Requires=cc-session-explorer.socket
+After=cc-session-explorer.socket
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+# @PLUGIN_ROOT@ is substituted with this plugin's actual install directory by
+# cc-session-explorer-startup at copy time -- it varies by install (dev checkout vs.
+# the versioned plugin cache dir), so it can't be a literal path in this source file.
+ExecStart=@PLUGIN_ROOT@/.venv/bin/cc-session-explorer
+# Exiting after CC_SESSION_EXPLORER_IDLE_EXIT_SECONDS without a request is a success, not a
+# fault: the socket keeps listening and starts us again on the next one. Restarting on a
+# clean exit would defeat that and hold the dashboard's memory forever.
+Restart=on-failure
+RestartSec=5
+Nice=10
+# Backstop: reclaim past 768M, hard-kill past 1.5G. Idle-exit bounds steady-state memory,
+# not a single request -- a large export or a burst of concurrent requests shouldn't be
+# free to grow unbounded before the idle timer would otherwise clean it up.
+MemoryHigh=768M
+MemoryMax=1536M
+
+# Hardening. Reads ~/.claude/projects; serves loopback only.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressAllow=localhost
+IPAddressDeny=any

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Live transcript capture: cc-session-watch as an always-on per-user LaunchAgent.
+  Logs: tail -f ~/Library/Logs/cc-session-explorer/watch.log
+
+  No socket involved: this mirrors the Linux systemd watch unit directly, with
+  no macOS-specific behavior gap. KeepAlive=true restarts it unconditionally
+  (systemd's Restart=always); LowPriorityIO+Nice keep catch-up ingest from
+  competing with interactive work, matching IOSchedulingClass=idle+Nice=10 on
+  Linux. launchd has no per-job memory-limit primitive comparable to systemd's
+  MemoryHigh/MemoryMax, so that backstop is not replicated here.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.cc-session-explorer.watch</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>@PLUGIN_ROOT@/.venv/bin/cc-session-watch</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>5</integer>
+	<key>Nice</key>
+	<integer>10</integer>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>LowPriorityIO</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>@HOME@/Library/Logs/cc-session-explorer/watch.log</string>
+	<key>StandardErrorPath</key>
+	<string>@HOME@/Library/Logs/cc-session-explorer/watch.log</string>
+</dict>
+</plist>

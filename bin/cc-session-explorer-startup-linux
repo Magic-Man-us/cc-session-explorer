@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Idempotent: installs this plugin's bundled systemd user units, then starts them. Safe to
+# run on every plugin load -- `systemctl enable --now` on an already-running unit is a no-op.
+#
+# The dashboard is socket-activated: cc-session-explorer.socket holds the port and starts
+# cc-session-explorer.service on demand, which exits after an idle period (see
+# ExplorerSettings.idle_exit_seconds). So the *socket* gets enabled, never the service
+# directly -- and if an older install enabled the service directly, this migrates it.
+# The transcript watcher has no port and must observe filesystem events continuously,
+# so it stays a plain always-on service.
+set -euo pipefail
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+UNIT_DIR="$HOME/.config/systemd/user"
+SOCKET_UNIT=cc-session-explorer.socket
+mkdir -p "$UNIT_DIR"
+
+# Compare contents rather than mere existence: a unit edited upstream -- a changed port, say
+# -- has to reach installs that already carry an older copy of it. Compare the *rendered*
+# unit, not the source file verbatim: the source carries a @PLUGIN_ROOT@ placeholder (the
+# ExecStart binary lives under this install's own directory, which differs between a dev
+# checkout and the versioned plugin cache dir Claude Code materializes on `plugin install`),
+# so it can't be a literal path in version control.
+reload=0
+socket_changed=0
+for unit in "$SOCKET_UNIT" cc-session-explorer.service cc-session-watch.service; do
+  rendered="$UNIT_DIR/.$unit.new"
+  sed "s|@PLUGIN_ROOT@|$PLUGIN_ROOT|g" "$PLUGIN_ROOT/systemd/$unit" > "$rendered"
+  if ! cmp -s "$rendered" "$UNIT_DIR/$unit" 2>/dev/null; then
+    mv "$rendered" "$UNIT_DIR/$unit"
+    reload=1
+    [ "$unit" = "$SOCKET_UNIT" ] && socket_changed=1
+  else
+    rm -f "$rendered"
+  fi
+done
+[ "$reload" = 1 ] && systemctl --user daemon-reload
+
+# The watcher goes first and on its own: it is the one that falls behind when it is not
+# running, and the dashboard below is allowed to fail without taking it with it.
+systemctl --user enable --now cc-session-watch.service
+
+# Migrate an install that enabled the service directly, back when it was always-on. Match
+# "enabled" exactly: is-enabled exits 0 for a static unit too, and disabling one is an error.
+if [ "$(systemctl --user is-enabled cc-session-explorer.service 2>/dev/null)" = enabled ]; then
+  systemctl --user disable --now cc-session-explorer.service
+fi
+
+# A listening socket keeps the address it was started with across a daemon-reload, so a
+# rewritten unit only takes effect once the old listener is gone.
+if [ "$socket_changed" = 1 ]; then
+  systemctl --user stop "$SOCKET_UNIT" 2>/dev/null || true
+fi
+
+# Ask whether it is listening rather than trusting the exit code: `enable --now` reports
+# success from the enable half even when the start half failed to bind.
+systemctl --user enable --now "$SOCKET_UNIT" || true
+if ! systemctl --user is-active --quiet "$SOCKET_UNIT"; then
+  addr="$(sed -n 's/^ListenStream=//p' "$UNIT_DIR/$SOCKET_UNIT")"
+  {
+    echo "cc-session-explorer: cannot listen on ${addr} -- something else already holds it:"
+    ss -ltnp "sport = :${addr##*:}" 2>/dev/null | tail -n +2
+    echo "Free that port or change ListenStream= in $UNIT_DIR/$SOCKET_UNIT."
+    echo "This does not affect the transcript watcher, which is currently:" \
+      "$(systemctl --user is-active cc-session-watch.service)"
+  } >&2
+fi

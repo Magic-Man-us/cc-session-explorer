@@ -1,0 +1,14 @@
+# Holds port 9821 so the dashboard itself does not have to.
+# Install: bin/cc-session-explorer-startup (renders @PLUGIN_ROOT@ in the paired .service
+# file and installs both units -- a raw `cp` leaves that placeholder unresolved).
+# The service is started by this socket on the first connection and stops once idle, so
+# enable the socket, never the service.
+
+[Unit]
+Description=cc-session-explorer dashboard socket (127.0.0.1:9821)
+
+[Socket]
+ListenStream=127.0.0.1:9821
+
+[Install]
+WantedBy=sockets.target

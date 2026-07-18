@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Starts the dashboard (idempotent, via cc-session-explorer-startup), then polls its
+# liveness every 15s and prints one line only on an up/down transition -- a plugin monitor
+# delivers each stdout line as a notification, so this stays quiet while healthy instead of
+# paging constantly.
+#
+# On Linux, deliberately checks the *socket*, not /healthz over HTTP: the dashboard is
+# socket-activated and exits after an idle period, and polling it over HTTP would itself be
+# a request that resets that idle clock -- keeping it resident forever and defeating the
+# whole point of socket activation. The socket unit itself stays "active" (listening)
+# regardless of whether the backend process is currently up, which is exactly the liveness
+# signal worth reporting here.
+#
+# On macOS there is no socket unit (the dashboard runs always-on, see
+# launchd/com.cc-session-explorer.dashboard.plist for why), so the idle-clock concern above
+# does not apply; checking whether the LaunchAgent is loaded is the direct equivalent.
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"$SCRIPT_DIR/cc-session-explorer-startup"
+
+is_up() {
+  case "$(uname -s)" in
+    Linux) systemctl --user is-active --quiet cc-session-explorer.socket ;;
+    Darwin) launchctl list com.cc-session-explorer.dashboard >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+
+last=""
+while true; do
+  if is_up; then
+    state="up"
+  else
+    state="down"
+  fi
+  if [ "$state" != "$last" ]; then
+    echo "cc-session-explorer dashboard is $state"
+    last="$state"
+  fi
+  sleep 15
+done

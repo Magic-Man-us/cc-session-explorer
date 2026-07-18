@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Dispatches to the OS-specific installer: systemd on Linux, launchd on macOS.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+case "$(uname -s)" in
+  Linux)
+    exec "$SCRIPT_DIR/cc-session-explorer-startup-linux"
+    ;;
+  Darwin)
+    exec "$SCRIPT_DIR/cc-session-explorer-startup-darwin"
+    ;;
+  *)
+    echo "cc-session-explorer: no auto-start integration for $(uname -s)." >&2
+    echo "Run 'cc-session-explorer' and 'cc-session-watch' directly instead (see README.md)." >&2
+    exit 1
+    ;;
+esac

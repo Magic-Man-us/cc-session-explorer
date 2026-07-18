@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "cc-session-explorer": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/cc-session-explorer-mcp"
+    }
+  }
+}
