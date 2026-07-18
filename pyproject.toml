@@ -22,7 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "cc-session-core>=0.1.0,<0.2.0",
-    "fastapi>=0.115",
+    "fastapi>=0.139.2",
     "mcp>=1.28",
     "pydantic>=2.11",
     "pydantic-settings>=2.4",
