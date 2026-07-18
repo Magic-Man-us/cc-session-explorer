@@ -1,0 +1,43 @@
+{
+  "name": "@cc-session/dashboard-ui",
+  "version": "0.1.0",
+  "description": "cc-session dashboard design system — React components extracted from the token-ledger dashboard",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/cc-session-ui.umd.cjs",
+  "module": "./dist/cc-session-ui.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/cc-session-ui.js",
+      "require": "./dist/cc-session-ui.umd.cjs"
+    },
+    "./styles.css": "./dist/dashboard-ui.css"
+  },
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "dev": "vite",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.3",
+    "vite-plugin-dts": "^4.3.0"
+  },
+  "dependencies": {
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  }
+}
