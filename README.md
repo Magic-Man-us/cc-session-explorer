@@ -1,5 +1,12 @@
 # cc-session-explorer
 
+[![PyPI](https://img.shields.io/pypi/v/cc-session-explorer.svg)](https://pypi.org/project/cc-session-explorer/)
+[![Python versions](https://img.shields.io/pypi/pyversions/cc-session-explorer.svg)](https://pypi.org/project/cc-session-explorer/)
+[![CI](https://github.com/Magic-Man-us/cc-session-explorer/actions/workflows/publish.yml/badge.svg)](https://github.com/Magic-Man-us/cc-session-explorer/actions/workflows/publish.yml)
+[![codecov](https://codecov.io/gh/Magic-Man-us/cc-session-explorer/branch/main/graph/badge.svg)](https://codecov.io/gh/Magic-Man-us/cc-session-explorer)
+[![Dependabot](https://img.shields.io/badge/Dependabot-enabled-brightgreen.svg)](https://github.com/Magic-Man-us/cc-session-explorer/blob/main/.github/dependabot.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/Magic-Man-us/cc-session-explorer/blob/main/LICENSE)
+
 Replays Claude Code session transcripts and Claude.ai exports as context-token
 timelines, cost ledgers, and project breakdowns — a FastAPI dashboard, CLI tools,
 and an MCP server built on [cc-session-core](https://github.com/Magic-Man-us/cc-session-core),
