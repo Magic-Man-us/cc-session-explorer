@@ -1,0 +1,5 @@
+{
+  "name": "@cc-session/dashboard-frontend",
+  "private": true,
+  "workspaces": ["app", "ui"]
+}
