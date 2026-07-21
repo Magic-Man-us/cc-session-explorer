@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import time
 from typing import TYPE_CHECKING
 
 from cc_session_core.types import FilePath
@@ -27,6 +28,8 @@ logger = logging.getLogger(__name__)
 _DIR_MODE = 0o700
 _FILE_MODE = 0o600
 _DEFAULT_SEARCH_LIMIT = 20
+_CONNECT_RETRIES = 50
+_CONNECT_RETRY_DELAY_S = 0.1
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS records (
@@ -230,18 +233,26 @@ def connect(db_path: Path) -> sqlite3.Connection:
     """
     db_path.parent.mkdir(parents=True, exist_ok=True)
     db_path.parent.chmod(_DIR_MODE)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.executescript(_SCHEMA)
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(ingest_state)")}
-    if "tail_offset" not in columns:
-        # Pre-tail-read layout: drop the high-water marks; the next sweep re-ingests whole.
-        conn.execute("DROP TABLE ingest_state")
-        conn.executescript(_SCHEMA)
-    db_path.chmod(_FILE_MODE)
-    return conn
+    for _attempt in range(_CONNECT_RETRIES):
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.executescript(_SCHEMA)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(ingest_state)")}
+            if "tail_offset" not in columns:
+                # Pre-tail-read layout: drop the high-water marks; the next sweep re-ingests whole.
+                conn.execute("DROP TABLE ingest_state")
+                conn.executescript(_SCHEMA)
+            db_path.chmod(_FILE_MODE)
+            return conn
+        except sqlite3.OperationalError as exc:
+            conn.close()
+            if "locked" not in str(exc).lower():
+                raise
+            time.sleep(_CONNECT_RETRY_DELAY_S)
+    raise sqlite3.OperationalError("database is locked")
 
 
 def count_records(conn: sqlite3.Connection) -> int:
