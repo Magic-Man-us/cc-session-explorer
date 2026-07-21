@@ -249,7 +249,7 @@ def connect(db_path: Path) -> sqlite3.Connection:
             return conn
         except sqlite3.OperationalError as exc:
             conn.close()
-            if str(exc) != "database is locked":
+            if "locked" not in str(exc).lower():
                 raise
             time.sleep(_CONNECT_RETRY_DELAY_S)
     raise sqlite3.OperationalError("database is locked")
