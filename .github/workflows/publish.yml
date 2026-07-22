@@ -38,6 +38,30 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pyright
 
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Typecheck design system
+        working-directory: frontend/ui
+        run: npm run typecheck
+      - name: Build dashboard SPA
+        working-directory: frontend/app
+        run: npm run build
+      - name: Upload built SPA
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-static
+          path: src/cc_session_explorer/static/index.html
+
   test:
     strategy:
       fail-fast: false
@@ -80,12 +104,13 @@ jobs:
           flags: python-${{ matrix.python-version }}
 
   package:
-    needs: [secrets-scan, lint, test]
+    needs: [secrets-scan, lint, frontend, test]
     # secrets-scan is skipped (not successful) on release events by design, so the
     # default needs-check would cascade-skip package/publish on every release.
     if: |
       always() &&
       needs.lint.result == 'success' &&
+      needs.frontend.result == 'success' &&
       needs.test.result == 'success' &&
       needs.secrets-scan.result != 'failure'
     runs-on: ubuntu-latest
@@ -93,6 +118,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-static
+          path: src/cc_session_explorer/static
 
       - uses: astral-sh/setup-uv@v8.3.2
 
