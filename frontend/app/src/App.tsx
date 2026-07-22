@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Breadcrumbs, Button, EmptyState, LoadingState, Root, Sidebar, type Crumb } from "@cc-session/dashboard-ui";
 
@@ -60,6 +60,37 @@ function pageTitle(page: Page): string {
   }
 }
 
+function pageDescription(page: Page): string {
+  switch (page.kind) {
+    case "overview":
+      return "Start with total spend, token flow, recent activity, and data-health signals.";
+    case "live-feed":
+      return "Follow active Claude sessions and expand each message to inspect its tools and thinking.";
+    case "sessions":
+      return "Search historical sessions; select a session identifier to open its full context replay.";
+    case "time":
+      return "Compare usage by week, day, hour, or five-minute interval and drill into any bucket.";
+    case "time-bucket":
+      return `Inspect the sessions and transcript activity recorded in ${page.bucket}.`;
+    case "models":
+      return "Compare token volume, turns, and estimated cost across models.";
+    case "projects":
+      return "Compare usage across projects and jump directly into their sessions.";
+    case "data":
+      return "Inspect the generated snapshot and the underlying ledger source.";
+    case "context-sessions":
+      return "Browse captured transcripts and open the context-flow report for any session.";
+    case "context-session":
+      return "Trace token flow, context chains, tool activity, and the complete transcript in one report.";
+    case "context-projects":
+      return "Find projects with captured context data and inspect their session breakdowns.";
+    case "context-project":
+      return "Compare the context-window load across sessions for this project.";
+    case "context-ledger":
+      return "Review context-window events across the complete historical ledger.";
+  }
+}
+
 function breadcrumbs(page: Page, go: (page: Page) => void): Crumb[] {
   const root = isContextPage(page)
     ? { label: "Context replay", onClick: () => go({ kind: "context-sessions" }) }
@@ -84,9 +115,11 @@ export function App() {
   const [sessionsQuery, setSessionsQuery] = useState("");
   const [modelsQuery, setModelsQuery] = useState("");
   const [projectsQuery, setProjectsQuery] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const skipNextPush = useRef(false);
+  const queryClient = useQueryClient();
 
-  const { data, isPending, isError, error, refetch } = useQuery({
+  const { data, isPending, isError, error } = useQuery({
     queryKey: ["snapshot"],
     queryFn: fetchSnapshot,
   });
@@ -100,6 +133,15 @@ export function App() {
     if (request.page.kind === "projects") setProjectsQuery(request.query);
   };
 
+  const refreshData = async () => {
+    setRefreshing(true);
+    try {
+      await queryClient.invalidateQueries({ refetchType: "active" });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   useEffect(() => {
     const path = pathForPage(page);
     if (skipNextPush.current) {
@@ -108,6 +150,10 @@ export function App() {
       return;
     }
     if (window.location.pathname !== path) window.history.pushState(null, "", path);
+  }, [page]);
+
+  useEffect(() => {
+    document.title = `${pageTitle(page)} · cc-session-explorer`;
   }, [page]);
 
   useEffect(() => {
@@ -120,10 +166,10 @@ export function App() {
   }, []);
 
   const stamp = isPending
-    ? "Loading latest snapshot"
+    ? "Loading latest usage snapshot"
     : isError
-      ? "Snapshot unavailable"
-      : `Generated ${data.generated_at.slice(0, 19).replace("T", " ")}`;
+      ? "Usage snapshot unavailable"
+      : `Usage snapshot generated ${data.generated_at.slice(0, 19).replace("T", " ")}`;
 
   const renderPage = () => {
     switch (page.kind) {
@@ -176,9 +222,12 @@ export function App() {
             <div className="cc-page-heading">
               <Breadcrumbs crumbs={breadcrumbs(page, go)} />
               <h1>{pageTitle(page)}</h1>
+              <p className="cc-page-description">{pageDescription(page)}</p>
               <div className="ju-muted cc-page-stamp">{stamp}</div>
             </div>
-            <Button onClick={() => refetch()}>Refresh data</Button>
+            <Button disabled={refreshing} onClick={refreshData}>
+              {refreshing ? "Refreshing…" : "Refresh active data"}
+            </Button>
           </header>
           <div className="cc-page-content">{renderPage()}</div>
         </main>

@@ -13,8 +13,8 @@ export function Overview({ data }: { data: DashboardSnapshot }) {
   const days = data.daily.slice(-42).map((d) => toBar(d.day, d.tokens, `${d.day} · ${fmtTok(d.tokens.total_tokens)} tokens · ${d.sessions} sessions`));
 
   return (
-    <div style={{ display: "grid", gap: 14 }}>
-      <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(4, minmax(0,1fr))" }}>
+    <div className="cc-dashboard">
+      <div className="cc-kpi-grid">
         <KpiCard label="corrected tokens" value={fmtTok(t.tokens.total_tokens)} hint={`${fmtInt(t.turns)} unique assistant messages`} />
         <KpiCard label="notional cost" value={money(t.notional_cost_usd)} hint="API-list estimate" />
         <KpiCard
@@ -30,11 +30,11 @@ export function Overview({ data }: { data: DashboardSnapshot }) {
         <Sankey data={data} />
       </Card>
 
-      <div style={{ display: "grid", gap: 14, gridTemplateColumns: "minmax(0,1.15fr) minmax(320px,.85fr)" }}>
-        <Card title="tokens per day" meta="last 42 days">
+      <div className="cc-overview-grid cc-overview-grid--weighted">
+        <Card title="tokens per day" meta="last 42 days — click a bar">
           {usageBarChart(days, setDay)}
           <div style={{ marginTop: 14 }}>
-            <BucketDetailPanel grain="daily" bucket={day} hint="Hover a day to inspect sessions." />
+            <BucketDetailPanel grain="daily" bucket={day} hint="Click a day to inspect its sessions." />
           </div>
         </Card>
         <Card title="where tokens went" meta={`${fmtTok(t.tokens.total_tokens)} total`}>
@@ -47,7 +47,7 @@ export function Overview({ data }: { data: DashboardSnapshot }) {
         </Card>
       </div>
 
-      <div style={{ display: "grid", gap: 14, gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)" }}>
+      <div className="cc-overview-grid">
         <Card title="corrected vs raw transcript rows" meta="deduped, plus ledger history for rotated-off sessions">
           <StatBar
             rows={[
