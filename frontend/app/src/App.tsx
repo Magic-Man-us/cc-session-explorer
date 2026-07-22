@@ -5,7 +5,16 @@ import { Breadcrumbs, Button, EmptyState, LoadingState, Root, Sidebar, type Crum
 
 import { fetchSnapshot } from "./api";
 import { NavProvider, type NavRequest } from "./nav";
-import { NAV, VIEW_LABELS, isContextView, pathForView, routeFromPath, type View } from "./routes";
+import {
+  NAV,
+  NAV_LABELS,
+  isContextPage,
+  navKindFor,
+  pageForNavKind,
+  pageFromPath,
+  pathForPage,
+  type Page,
+} from "./routes";
 import { Overview } from "./pages/Overview";
 import { Time } from "./pages/Time";
 import { BucketDetail } from "./pages/BucketDetail";
@@ -20,151 +29,158 @@ import { ContextProjects } from "./pages/context/Projects";
 import { ContextProjectDetail } from "./pages/context/ProjectDetail";
 import { ContextLedger } from "./pages/context/Ledger";
 
-export function App() {
-  const [view, setView] = useState<View>(() => routeFromPath(window.location.pathname).view);
-  const { data, isPending, isError, error, refetch } = useQuery({ queryKey: ["snapshot"], queryFn: fetchSnapshot });
-  const stamp = isPending
-    ? "Loading"
-    : isError
-      ? "Unavailable"
-      : "Generated " + data.generated_at.slice(0, 19).replace("T", " ");
+function pageTitle(page: Page): string {
+  switch (page.kind) {
+    case "overview":
+      return "Session dashboard";
+    case "live-feed":
+      return "Live session monitor";
+    case "sessions":
+      return "Session history";
+    case "time":
+      return "Usage over time";
+    case "time-bucket":
+      return "Time bucket details";
+    case "models":
+      return "Model usage";
+    case "projects":
+      return "Project usage";
+    case "data":
+      return "Data source";
+    case "context-sessions":
+      return "Context session explorer";
+    case "context-session":
+      return "Session context replay";
+    case "context-projects":
+      return "Context project explorer";
+    case "context-project":
+      return "Project context breakdown";
+    case "context-ledger":
+      return "Context ledger";
+  }
+}
 
+function breadcrumbs(page: Page, go: (page: Page) => void): Crumb[] {
+  const root = isContextPage(page)
+    ? { label: "Context replay", onClick: () => go({ kind: "context-sessions" }) }
+    : { label: "Cost & usage", onClick: () => go({ kind: "overview" }) };
+
+  switch (page.kind) {
+    case "overview":
+      return [{ label: "Cost & usage" }];
+    case "time-bucket":
+      return [root, { label: "Usage Over Time", onClick: () => go({ kind: "time" }) }, { label: page.bucket }];
+    case "context-session":
+      return [root, { label: "Sessions", onClick: () => go({ kind: "context-sessions" }) }, { label: page.sessionId.slice(0, 12) }];
+    case "context-project":
+      return [root, { label: "Projects", onClick: () => go({ kind: "context-projects" }) }, { label: page.project }];
+    default:
+      return [root, { label: NAV_LABELS[navKindFor(page)] }];
+  }
+}
+
+export function App() {
+  const [page, setPage] = useState<Page>(() => pageFromPath(window.location.pathname));
   const [sessionsQuery, setSessionsQuery] = useState("");
   const [modelsQuery, setModelsQuery] = useState("");
   const [projectsQuery, setProjectsQuery] = useState("");
-  const [contextSession, setContextSession] = useState<string | null>(
-    () => routeFromPath(window.location.pathname).contextSession,
-  );
-  const [contextProject, setContextProject] = useState<string | null>(
-    () => routeFromPath(window.location.pathname).contextProject,
-  );
-  const [timeGrain, setTimeGrain] = useState<string | null>(
-    () => routeFromPath(window.location.pathname).timeGrain,
-  );
-  const [timeBucket, setTimeBucket] = useState<string | null>(
-    () => routeFromPath(window.location.pathname).timeBucket,
-  );
-
-  // Keep the URL, browser history, and this state in sync both ways: a state change here
-  // pushes a history entry (so back/forward and shareable links work), and popstate (back/
-  // forward, or a fresh load) re-derives state from the URL without re-pushing it.
   const skipNextPush = useRef(false);
+
+  const { data, isPending, isError, error, refetch } = useQuery({
+    queryKey: ["snapshot"],
+    queryFn: fetchSnapshot,
+  });
+
+  const go = (nextPage: Page) => setPage(nextPage);
+  const navigate = (request: NavRequest) => {
+    setPage(request.page);
+    if (request.query === undefined) return;
+    if (request.page.kind === "sessions") setSessionsQuery(request.query);
+    if (request.page.kind === "models") setModelsQuery(request.query);
+    if (request.page.kind === "projects") setProjectsQuery(request.query);
+  };
+
   useEffect(() => {
-    const path = pathForView(view, contextSession, contextProject, timeGrain, timeBucket);
+    const path = pathForPage(page);
     if (skipNextPush.current) {
       skipNextPush.current = false;
       if (window.location.pathname !== path) window.history.replaceState(null, "", path);
       return;
     }
     if (window.location.pathname !== path) window.history.pushState(null, "", path);
-  }, [view, contextSession, contextProject, timeGrain, timeBucket]);
+  }, [page]);
 
   useEffect(() => {
     const onPopState = () => {
-      const route = routeFromPath(window.location.pathname);
       skipNextPush.current = true;
-      setView(route.view);
-      setContextSession(route.contextSession);
-      setContextProject(route.contextProject);
-      setTimeGrain(route.timeGrain);
-      setTimeBucket(route.timeBucket);
+      setPage(pageFromPath(window.location.pathname));
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
-  const navigate = (request: NavRequest) => {
-    if (request.lens === "context") {
-      setView(request.contextView ?? "ctx-sessions");
-      if (request.contextSession !== undefined) setContextSession(request.contextSession);
-      if (request.contextProject !== undefined) setContextProject(request.contextProject);
-      return;
-    }
-    setView(request.view ?? "overview");
-    if (request.timeGrain !== undefined) setTimeGrain(request.timeGrain);
-    if (request.timeBucket !== undefined) setTimeBucket(request.timeBucket);
-    if (request.query !== undefined) {
-      if (request.view === "sessions") setSessionsQuery(request.query);
-      if (request.view === "models") setModelsQuery(request.query);
-      if (request.view === "projects") setProjectsQuery(request.query);
+  const stamp = isPending
+    ? "Loading latest snapshot"
+    : isError
+      ? "Snapshot unavailable"
+      : `Generated ${data.generated_at.slice(0, 19).replace("T", " ")}`;
+
+  const renderPage = () => {
+    switch (page.kind) {
+      case "context-sessions":
+        return <ContextSessions />;
+      case "context-session":
+        return <ContextSessionDetail session={page.sessionId} />;
+      case "context-projects":
+        return <ContextProjects />;
+      case "context-project":
+        return <ContextProjectDetail project={page.project} />;
+      case "context-ledger":
+        return <ContextLedger />;
+      default:
+        if (isError) return <EmptyState>{error.message}</EmptyState>;
+        if (isPending) return <LoadingState>Loading dashboard…</LoadingState>;
+        switch (page.kind) {
+          case "overview":
+            return <Overview data={data} />;
+          case "time":
+            return <Time data={data} />;
+          case "time-bucket":
+            return <BucketDetail grain={page.grain} bucket={page.bucket} />;
+          case "live-feed":
+            return <LiveFeed />;
+          case "sessions":
+            return <Sessions rows={data.recent_sessions} query={sessionsQuery} onQueryChange={setSessionsQuery} />;
+          case "models":
+            return <Models rows={data.models} query={modelsQuery} onQueryChange={setModelsQuery} />;
+          case "projects":
+            return <Projects rows={data.projects} query={projectsQuery} onQueryChange={setProjectsQuery} />;
+          case "data":
+            return <Data data={data} />;
+        }
     }
   };
 
-  // The trail shown above the page title — lens ▸ view ▸ selected item. Each non-terminal
-  // segment clears one level of drill-down rather than resetting the whole view.
-  const crumbs: Crumb[] = (() => {
-    if (view === "ctx-sessions") {
-      const trail: Crumb[] = [{ label: "Context windows", onClick: () => setView("ctx-sessions") }];
-      trail.push(
-        contextSession
-          ? { label: "Sessions", onClick: () => setContextSession(null) }
-          : { label: "Sessions" },
-      );
-      if (contextSession) trail.push({ label: contextSession.slice(0, 12) });
-      return trail;
-    }
-    if (view === "ctx-projects") {
-      const trail: Crumb[] = [{ label: "Context windows", onClick: () => setView("ctx-sessions") }];
-      trail.push(
-        contextProject
-          ? { label: "Projects", onClick: () => setContextProject(null) }
-          : { label: "Projects" },
-      );
-      if (contextProject) trail.push({ label: contextProject });
-      return trail;
-    }
-    if (view === "ctx-ledger") {
-      return [{ label: "Context windows", onClick: () => setView("ctx-sessions") }, { label: "Ledger" }];
-    }
-    if (view === "overview") return [{ label: "Cost & usage" }];
-    if (view === "time" && timeBucket) {
-      return [
-        { label: "Cost & usage", onClick: () => setView("overview") },
-        { label: "Time", onClick: () => setTimeBucket(null) },
-        { label: timeBucket },
-      ];
-    }
-    return [{ label: "Cost & usage", onClick: () => setView("overview") }, { label: VIEW_LABELS[view] }];
-  })();
-
   return (
     <NavProvider navigate={navigate}>
-      <Root style={{ display: "grid", gridTemplateColumns: "248px 1fr", minHeight: "100vh" }}>
-        <Sidebar brand="cc-sessions" subtitle="cost · context" items={NAV} active={view} onSelect={setView} />
-        <main style={{ padding: 24, minWidth: 0 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 18, marginBottom: 22 }}>
-            <div>
-              <Breadcrumbs crumbs={crumbs} />
-              <h1 style={{ margin: 0, fontSize: 24, lineHeight: 1.15 }}>
-                {isContextView(view) ? "Context-window replay" : "Session cost and token flow"}
-              </h1>
-              <div className="ju-muted" style={{ fontSize: 12, marginTop: 6 }}>{stamp}</div>
+      <Root className="cc-shell">
+        <Sidebar
+          brand="cc-session-explorer"
+          subtitle="Claude session intelligence"
+          items={NAV}
+          active={navKindFor(page)}
+          onSelect={(kind) => go(pageForNavKind(kind))}
+        />
+        <main className="cc-main">
+          <header className="cc-page-header">
+            <div className="cc-page-heading">
+              <Breadcrumbs crumbs={breadcrumbs(page, go)} />
+              <h1>{pageTitle(page)}</h1>
+              <div className="ju-muted cc-page-stamp">{stamp}</div>
             </div>
-            <Button onClick={() => refetch()}>Refresh</Button>
-          </div>
-
-          {view === "ctx-sessions" && (contextSession ? <ContextSessionDetail session={contextSession} /> : <ContextSessions />)}
-          {view === "ctx-projects" && (contextProject ? <ContextProjectDetail project={contextProject} /> : <ContextProjects />)}
-          {view === "ctx-ledger" && <ContextLedger />}
-          {!isContextView(view) && isError && <EmptyState>{error.message}</EmptyState>}
-          {!isContextView(view) && isPending && <LoadingState>Loading dashboard…</LoadingState>}
-          {!isContextView(view) && !isPending && !isError && (
-            <>
-              {view === "overview" && <Overview data={data} />}
-              {view === "time" && (timeGrain && timeBucket ? <BucketDetail grain={timeGrain} bucket={timeBucket} /> : <Time data={data} />)}
-              {view === "live-log" && <LiveFeed />}
-              {view === "sessions" && (
-                <Sessions rows={data.recent_sessions} query={sessionsQuery} onQueryChange={setSessionsQuery} />
-              )}
-              {view === "models" && (
-                <Models rows={data.models} query={modelsQuery} onQueryChange={setModelsQuery} />
-              )}
-              {view === "projects" && (
-                <Projects rows={data.projects} query={projectsQuery} onQueryChange={setProjectsQuery} />
-              )}
-              {view === "data" && <Data data={data} />}
-            </>
-          )}
+            <Button onClick={() => refetch()}>Refresh data</Button>
+          </header>
+          <div className="cc-page-content">{renderPage()}</div>
         </main>
       </Root>
     </NavProvider>
