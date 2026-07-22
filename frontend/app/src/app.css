@@ -26,8 +26,13 @@
   max-width: 1600px;
 }
 
+.cc-page-header > .ju-button {
+  flex: 0 0 auto;
+}
+
 .cc-page-heading {
   min-width: 0;
+  max-width: 820px;
 }
 
 .cc-page-heading h1 {
@@ -35,6 +40,14 @@
   font-size: clamp(22px, 2.2vw, 30px);
   line-height: 1.15;
   letter-spacing: -0.02em;
+}
+
+.cc-page-description {
+  margin: 8px 0 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+  opacity: 0.84;
 }
 
 .cc-page-stamp {
@@ -50,6 +63,37 @@
 
 .cc-page-content > * {
   min-width: 0;
+}
+
+.cc-dashboard {
+  display: grid;
+  gap: 14px;
+}
+
+.cc-kpi-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.cc-overview-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cc-overview-grid--weighted {
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+}
+
+@media (max-width: 1240px) {
+  .cc-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cc-overview-grid--weighted {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 960px) {
@@ -96,6 +140,13 @@
 
   .cc-main {
     padding-top: 22px;
+  }
+}
+
+@media (max-width: 760px) {
+  .cc-kpi-grid,
+  .cc-overview-grid {
+    grid-template-columns: 1fr;
   }
 }
 
