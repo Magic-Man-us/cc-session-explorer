@@ -21,6 +21,7 @@ export function ContextSessions() {
 
   const columns: Column<SessionRef>[] = [
     { key: "session", header: "session", render: (r) => <code>{r.session_id.slice(0, 12)}</code> },
+    { key: "provider", header: "provider", render: (r) => r.provider },
     { key: "project", header: "project", render: (r) => r.project },
     { key: "modified", header: "last modified", render: (r) => fmtWhen(r.last_modified) },
     { key: "size", header: "size", numeric: true, render: (r) => fmtBytes(r.size_bytes) },

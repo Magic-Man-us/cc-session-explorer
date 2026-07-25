@@ -4,7 +4,7 @@ import zipfile
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import TypeAdapter
+from pydantic import Field, TypeAdapter
 
 from .base import InputModel
 from .models import (
@@ -39,7 +39,7 @@ class _ExportContentBlock(InputModel):
 class _ExportMessage(InputModel):
     sender: str = ""
     text: str = ""
-    content: list[_ExportContentBlock] = []
+    content: list[_ExportContentBlock] = Field(default_factory=lambda: list[_ExportContentBlock]())
 
     def body(self) -> str:
         """The message's text — the flat `text` field, or the joined text blocks when it's empty."""
@@ -49,7 +49,7 @@ class _ExportMessage(InputModel):
 
 
 class _ExportConversation(InputModel):
-    chat_messages: list[_ExportMessage] = []
+    chat_messages: list[_ExportMessage] = Field(default_factory=lambda: list[_ExportMessage]())
 
 
 _CONVERSATIONS_ADAPTER: TypeAdapter[list[_ExportConversation]] = TypeAdapter(
@@ -120,7 +120,7 @@ def from_claude_ai_export(path: Path) -> ContextTimeline:
 
 
 @lru_cache(maxsize=4)
-def _cached_timeline(path_str: str, mtime_ns: int, size: int) -> ContextTimeline:  # noqa: ARG001
+def _cached_timeline(path_str: str, mtime_ns: int, size: int) -> ContextTimeline:
     """The aggregate keyed on the export's path and stat — parsed once per distinct file version."""
     return from_claude_ai_export(Path(path_str))
 

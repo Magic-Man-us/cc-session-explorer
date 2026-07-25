@@ -7,8 +7,6 @@ timeline entry index the client has seen — polling with ``after`` returns only
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from cc_session_core import Session
 from cc_session_core.report.views import (
     TextPart,
@@ -19,7 +17,8 @@ from cc_session_core.report.views import (
 )
 from pydantic_core import to_json
 
-from cc_session_explorer.usage.aggregate import bucket_span
+from cc_session_explorer.buckets import bucket_span
+from cc_session_explorer.sources import TranscriptLocation
 from cc_session_explorer.usage.models import (
     BlockContent,
     BlockRef,
@@ -33,9 +32,6 @@ from cc_session_explorer.usage.models import (
     TimelineToolUseEvent,
 )
 from cc_session_explorer.usage.scan import session_path
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 _CLIP = 6_000
 _MAX_EVENTS = 2_000
@@ -96,7 +92,9 @@ def _events_from_entry(entry: TimelineEntry) -> list[TimelineEvent]:
     return events
 
 
-def _load_timeline(projects_root: Path, session_id: str) -> list[TimelineEntry] | None:
+def _load_timeline(
+    projects_root: TranscriptLocation, session_id: str
+) -> list[TimelineEntry] | None:
     path = session_path(projects_root, session_id)
     if path is None:
         return None
@@ -104,7 +102,7 @@ def _load_timeline(projects_root: Path, session_id: str) -> list[TimelineEntry] 
 
 
 def build_session_timeline(
-    projects_root: Path, session_id: str, grain: str, bucket: str
+    projects_root: TranscriptLocation, session_id: str, grain: str, bucket: str
 ) -> SessionTimeline | None:
     """The session's events inside one time bucket, or None for an unknown session."""
     entries = _load_timeline(projects_root, session_id)
@@ -129,7 +127,7 @@ def build_session_timeline(
 
 
 def build_transcript(
-    projects_root: Path, session_id: str, after: int | None
+    projects_root: TranscriptLocation, session_id: str, after: int | None
 ) -> SessionTranscript | None:
     """The session's events past cursor ``after``, or None for an unknown session."""
     entries = _load_timeline(projects_root, session_id)
@@ -159,7 +157,7 @@ def build_transcript(
 
 
 def build_block(
-    projects_root: Path, session_id: str, record: int, index: int
+    projects_root: TranscriptLocation, session_id: str, record: int, index: int
 ) -> BlockContent | None:
     """The full, unclipped text of one timeline part, or None if it doesn't exist."""
     entries = _load_timeline(projects_root, session_id)

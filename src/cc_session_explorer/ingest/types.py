@@ -8,15 +8,17 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from cc_session_core.types import AgentId as AgentId  # re-exported for this lens
-from cc_session_core.types import ByteSize as ByteSize  # re-exported for this lens
-from cc_session_core.types import LineNumber as LineNumber  # re-exported for this lens
-from cc_session_core.types import MessageId as MessageId  # re-exported for this lens
-from cc_session_core.types import PrNumber as PrNumber  # re-exported for this lens
-from cc_session_core.types import RecordUuid as RecordUuid  # re-exported for this lens
-from cc_session_core.types import SessionId as SessionId  # re-exported for this lens
-from cc_session_core.types import ToolUseId as ToolUseId  # re-exported for this lens
+from cc_session_core import types as core_types
 from pydantic import Field
+
+AgentId = core_types.AgentId
+ByteSize = core_types.ByteSize
+LineNumber = core_types.LineNumber
+MessageId = core_types.MessageId
+PrNumber = core_types.PrNumber
+RecordUuid = core_types.RecordUuid
+SessionId = core_types.SessionId
+ToolUseId = core_types.ToolUseId
 
 AgentTaskKey = Annotated[
     str,

@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 
-from cc_session_explorer.api.deps import ProjectsRootDep, TranscriptsDbDep
+from cc_session_explorer.api.deps import TranscriptRootsDep, TranscriptsDbDep
 from cc_session_explorer.buckets import Grain
 from cc_session_explorer.usage.aggregate import (
     build_bucket,
@@ -64,10 +64,10 @@ def bucket(store_db: TranscriptsDbDep, grain: Grain, bucket: str) -> BucketDetai
 
 @router.get("/session-timeline")
 def session_timeline(
-    projects_root: ProjectsRootDep, session: str, grain: Grain, bucket: str
+    transcript_roots: TranscriptRootsDep, session: str, grain: Grain, bucket: str
 ) -> SessionTimeline:
     """One session's transcript events inside one time bucket."""
-    timeline = build_session_timeline(projects_root, session, grain, bucket)
+    timeline = build_session_timeline(transcript_roots, session, grain, bucket)
     if timeline is None:
         raise HTTPException(status_code=404, detail="session not found")
     return timeline
@@ -98,12 +98,12 @@ def live_sessions(
 
 @router.get("/session-transcript")
 def session_transcript(
-    projects_root: ProjectsRootDep,
+    transcript_roots: TranscriptRootsDep,
     session: str,
     after: Annotated[int | None, Query(ge=0)] = None,
 ) -> SessionTranscript:
     """The session's events past cursor ``after`` — the SPA polls this to follow live turns."""
-    transcript = build_transcript(projects_root, session, after)
+    transcript = build_transcript(transcript_roots, session, after)
     if transcript is None:
         raise HTTPException(status_code=404, detail="session not found")
     return transcript
@@ -111,13 +111,13 @@ def session_transcript(
 
 @router.get("/session-log")
 def session_log(
-    projects_root: ProjectsRootDep,
+    transcript_roots: TranscriptRootsDep,
     session: str,
     offset: Annotated[int, Query(ge=0)] = 0,
     line: Annotated[int, Query(ge=0)] = 0,
 ) -> SessionLog:
     """Every record appended past the cursor, full detail — the live-log view tails this."""
-    log = build_session_log(projects_root, session, offset, line)
+    log = build_session_log(transcript_roots, session, offset, line)
     if log is None:
         raise HTTPException(status_code=404, detail="session not found")
     return log
@@ -136,13 +136,13 @@ def search(
 
 @router.get("/block")
 def block(
-    projects_root: ProjectsRootDep,
+    transcript_roots: TranscriptRootsDep,
     session: str,
     record: Annotated[int, Query(ge=0)],
     index: Annotated[int, Query(ge=0)],
 ) -> BlockContent:
     """The full, unclipped text of one timeline part."""
-    content = build_block(projects_root, session, record, index)
+    content = build_block(transcript_roots, session, record, index)
     if content is None:
         raise HTTPException(status_code=404, detail="block not found")
     return content

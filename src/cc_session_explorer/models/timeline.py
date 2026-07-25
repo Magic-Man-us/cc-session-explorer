@@ -3,9 +3,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Protocol
 
-from pydantic import computed_field
+from pydantic import Field, computed_field
 
 from ..base import FrozenModel
+from ..sources import Provider
 from .types import (
     DEFAULT_WINDOW_TOKENS,
     ContentCharCount,
@@ -56,6 +57,7 @@ class SessionRef(FrozenModel):
 
     session_id: SourceLabel
     project: ProjectLabel
+    provider: Provider = "claude"
     size_bytes: SessionByteSize
     last_modified: str
 
@@ -80,7 +82,7 @@ class ContextTimeline(FrozenModel):
     source_kind: SourceKind
     source: SourceLabel
     window_tokens: WindowTokens = DEFAULT_WINDOW_TOKENS
-    events: list[ContextEvent] = []
+    events: list[ContextEvent] = Field(default_factory=lambda: list[ContextEvent]())
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -124,7 +126,7 @@ class EventGroup(FrozenModel):
     label: GroupLabel
     count: EventCount
     tokens: TokenCount
-    events: list[ContextEvent] = []
+    events: list[ContextEvent] = Field(default_factory=lambda: list[ContextEvent]())
 
 
 class SessionSummary(FrozenModel):
@@ -134,7 +136,7 @@ class SessionSummary(FrozenModel):
 
     ref: SessionRef
     window_tokens: WindowTokens = DEFAULT_WINDOW_TOKENS
-    kinds: list[KindSummary] = []
+    kinds: list[KindSummary] = Field(default_factory=lambda: list[KindSummary]())
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -163,8 +165,8 @@ class ProjectBreakdown(FrozenModel):
 
     project: ProjectLabel
     window_tokens: WindowTokens = DEFAULT_WINDOW_TOKENS
-    aggregate: list[KindSummary] = []
-    sessions: list[SessionSummary] = []
+    aggregate: list[KindSummary] = Field(default_factory=lambda: list[KindSummary]())
+    sessions: list[SessionSummary] = Field(default_factory=lambda: list[SessionSummary]())
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -194,7 +196,7 @@ class LedgerBucket(FrozenModel):
     session_count: EventCount
     project_count: EventCount
     size_bytes: SessionByteSize
-    aggregate: list[KindSummary] = []
+    aggregate: list[KindSummary] = Field(default_factory=lambda: list[KindSummary]())
 
     input_tokens: TokenCount = 0
     output_tokens: TokenCount = 0
@@ -224,7 +226,7 @@ class LedgerView(FrozenModel):
     """Daily or weekly Claude Code usage ledger derived from local session transcripts."""
 
     period: LedgerPeriod
-    buckets: list[LedgerBucket] = []
+    buckets: list[LedgerBucket] = Field(default_factory=lambda: list[LedgerBucket]())
 
     @computed_field  # type: ignore[prop-decorator]
     @property

@@ -16,6 +16,7 @@ from cc_session_explorer.base import FrozenModel
 from cc_session_explorer.ingest import SearchHit
 from cc_session_explorer.ingest.types import SessionId
 from cc_session_explorer.models.timeline import token_total
+from cc_session_explorer.sources import Provider
 from cc_session_explorer.types import CostUsd, ModelKey, TokenCount
 
 Role = Literal["user", "assistant"]
@@ -219,6 +220,7 @@ class SessionTranscript(FrozenModel):
 
 class LiveSession(FrozenModel):
     session_id: SessionId
+    provider: Provider = "claude"
     project: str | None
     first_prompt: str | None
     first_seen_at: str | None
@@ -273,6 +275,7 @@ class SessionLog(FrozenModel):
     """A batch of live-log records past the (`offset`, `line`) cursor."""
 
     session_id: SessionId
+    provider: Provider = "claude"
     file: str
     offset: ByteOffset
     line: LineNumber

@@ -10,8 +10,10 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from cc_session_core.types import TokenCount as TokenCount  # re-exported: identical ge=0 alias
+from cc_session_core import types as core_types
 from pydantic import Field
+
+TokenCount = core_types.TokenCount
 
 CostUsd = Annotated[
     float, Field(ge=0, title="Cost (USD)", description="Estimated USD cost at list rates.")

@@ -21,6 +21,12 @@ from cc_session_core.types import FilePath
 from cc_session_explorer.base import FrozenModel
 from cc_session_explorer.ingest.types import FileCount, RecordCount, SessionId
 from cc_session_explorer.paths import resolve_session_path
+from cc_session_explorer.sources import (
+    Provider,
+    TranscriptLocation,
+    project_from_storage_key,
+    provider_from_storage_key,
+)
 from cc_session_explorer.types import TokenCount
 
 logger = logging.getLogger(__name__)
@@ -32,6 +38,7 @@ class SessionScan(FrozenModel):
     """Per-session rollup read back from the store."""
 
     session_id: SessionId
+    provider: Provider
     project: str
     path: FilePath
     first_prompt: str | None
@@ -70,7 +77,7 @@ def _utc(value: object) -> datetime | None:
     if not isinstance(value, str) or not value:
         return None
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value)
     except ValueError:
         return None
     return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
@@ -94,7 +101,7 @@ def session_meta(store_db: Path, keys: list[str]) -> dict[str, SessionScan]:
             str(row["session_key"]): str(row["source"])
             for row in conn.execute(
                 "SELECT session_key, source FROM usage_events"
-                f" WHERE source IS NOT NULL AND session_key IN ({holes})"  # noqa: S608
+                f" WHERE source IS NOT NULL AND session_key IN ({holes})"
                 " GROUP BY session_key",
                 keys,
             ).fetchall()
@@ -108,7 +115,7 @@ def session_meta(store_db: Path, keys: list[str]) -> dict[str, SessionScan]:
             str(row["source"]): str(row["text"])
             for row in conn.execute(
                 "SELECT source, text, MIN(id) FROM records"
-                f" WHERE type = 'user' AND text != '' AND source IN ({marks})"  # noqa: S608
+                f" WHERE type = 'user' AND text != '' AND source IN ({marks})"
                 " GROUP BY source",
                 paths,
             ).fetchall()
@@ -117,7 +124,7 @@ def session_meta(store_db: Path, keys: list[str]) -> dict[str, SessionScan]:
             str(row["source"]): row
             for row in conn.execute(
                 "SELECT source, MIN(timestamp) AS first_seen, MAX(timestamp) AS last_seen"
-                f" FROM records WHERE source IN ({marks}) GROUP BY source",  # noqa: S608
+                f" FROM records WHERE source IN ({marks}) GROUP BY source",
                 paths,
             ).fetchall()
         }
@@ -132,7 +139,8 @@ def session_meta(store_db: Path, keys: list[str]) -> dict[str, SessionScan]:
         span = spans.get(source)
         meta[key] = SessionScan(
             session_id=key,
-            project=source.split("/")[0],
+            provider=provider_from_storage_key(source),
+            project=project_from_storage_key(source) or "",
             path=source,
             first_prompt=(prompts.get(source) or "")[:_FIRST_PROMPT_MAX] or None,
             first_seen=_utc(span["first_seen"]) if span is not None else None,
@@ -195,6 +203,6 @@ def scan_store(db_path: Path) -> ScanResult:
     return result
 
 
-def session_path(projects_root: Path, session_id: str) -> Path | None:
+def session_path(projects_root: TranscriptLocation, session_id: str) -> Path | None:
     """The transcript file for ``session_id`` on disk, or None once it has rotated away."""
     return resolve_session_path(projects_root, session_id)

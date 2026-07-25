@@ -11,9 +11,9 @@ full pretty-printed JSON, so the SPA can show literally everything the CLI wrote
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from cc_session_core import ParseFailure, tail_records, tool_result_text
+from cc_session_core import ParseFailure, Session, tail_records, tool_result_text
 from cc_session_core.models import (
     AssistantRecord,
     AttachmentRecord,
@@ -32,6 +32,7 @@ from cc_session_core.models import (
 )
 from pydantic_core import to_json
 
+from cc_session_explorer.sources import TranscriptLocation
 from cc_session_explorer.usage.models import (
     LogBlock,
     LogRecord,
@@ -41,8 +42,6 @@ from cc_session_explorer.usage.models import (
 from cc_session_explorer.usage.scan import session_path
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from cc_session_core import Record
 
 _BLOCK_CLIP = 20_000
@@ -238,22 +237,49 @@ def _log_record(record: Record | ParseFailure, line: int) -> LogRecord:
 
 
 def build_session_log(
-    projects_root: Path, session_id: str, offset: int, line: int
+    projects_root: TranscriptLocation, session_id: str, offset: int, line: int
 ) -> SessionLog | None:
     """The records past the cursor, or None for an unknown/vanished session file."""
     path = session_path(projects_root, session_id)
     if path is None:
         return None
+    session = Session.load(path)
+    if session.provider == "codex":
+        try:
+            size = path.stat().st_size
+        except FileNotFoundError:
+            return None
+        restarted = offset > size or line > len(session.records)
+        start = 0 if restarted else line
+        rows = [
+            _log_record(record, index)
+            for index, record in enumerate(session.records, start=1)
+            if index > start
+        ]
+        skipped = max(0, len(rows) - _MAX_RECORDS)
+        return SessionLog(
+            session_id=session_id,
+            provider="codex",
+            file=path.name,
+            offset=size,
+            line=len(session.records),
+            restarted=restarted,
+            skipped=skipped,
+            records=rows[skipped:],
+        )
     try:
         batch = tail_records(path, offset, line)
     except FileNotFoundError:
         # The file vanished between the scan and the read — a true 404. Other I/O
         # errors (permissions, transient fs faults) surface as 500s instead.
         return None
-    rows = [_log_record(item.record, item.line) for item in batch.records]
+    rows = [
+        _log_record(cast("Record | ParseFailure", item.record), item.line) for item in batch.records
+    ]
     skipped = max(0, len(rows) - _MAX_RECORDS)
     return SessionLog(
         session_id=session_id,
+        provider="claude",
         file=path.name,
         offset=batch.offset,
         line=batch.line,

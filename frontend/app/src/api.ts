@@ -158,6 +158,7 @@ export interface BlockContent {
 
 export interface LiveSession {
   session_id: string;
+  provider: "claude" | "codex";
   project: string | null;
   first_prompt: string | null;
   first_seen_at: string | null;
@@ -308,6 +309,7 @@ export interface LogRecord {
 
 export interface SessionLog {
   session_id: string;
+  provider: "claude" | "codex";
   file: string;
   offset: number;
   line: number;
@@ -328,12 +330,13 @@ export const fetchSessionLog = (session: string, offset = 0, line = 0): Promise<
 export interface SessionRef {
   session_id: string;
   project: string;
+  provider: "claude" | "codex";
   size_bytes: number;
   last_modified: string;
 }
 
 export interface ContextEvent {
-  kind: "auto" | "user" | "claude" | "hook" | "sub";
+  kind: "auto" | "user" | "claude" | "codex" | "hook" | "sub";
   label: string;
   tokens: number;
   estimated: boolean;

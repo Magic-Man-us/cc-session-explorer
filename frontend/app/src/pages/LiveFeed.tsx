@@ -191,11 +191,13 @@ function FeedRow({
   expanded,
   onToggle,
   links,
+  assistantName,
 }: {
   item: FeedItem;
   expanded: boolean;
   onToggle: () => void;
   links: ToolLinks;
+  assistantName: "claude" | "codex";
 }) {
   if (item.type === "activity") {
     return (
@@ -216,10 +218,10 @@ function FeedRow({
   const hasDetails = item.details.length > 0;
   return (
     <div className={`ju-chat-row ju-chat-${item.role}`}>
-      <div className="ju-chat-avatar">{item.role === "assistant" ? "C" : "U"}</div>
+      <div className="ju-chat-avatar">{item.role === "assistant" ? assistantName[0].toUpperCase() : "U"}</div>
       <div className="ju-chat-col">
         <div className="ju-chat-meta-line">
-          <span className="ju-chat-name">{item.role === "assistant" ? "claude" : "user"}</span>
+          <span className="ju-chat-name">{item.role === "assistant" ? assistantName : "user"}</span>
           <span className="ju-muted">{stamp(item.timestamp)}</span>
           {item.meta.length > 0 && <span className="ju-muted">{item.meta.join(" · ")}</span>}
           {hasDetails && (
@@ -247,6 +249,7 @@ function LogFollow({ session, info }: { session: string; info?: LiveSession }) {
   const [file, setFile] = useState("");
   const [skipped, setSkipped] = useState(0);
   const [status, setStatus] = useState("Loading");
+  const [provider, setProvider] = useState<"claude" | "codex">(info?.provider ?? "claude");
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
@@ -258,6 +261,7 @@ function LogFollow({ session, info }: { session: string; info?: LiveSession }) {
     setFile("");
     setSkipped(0);
     setStatus("Loading");
+    setProvider(info?.provider ?? "claude");
     setExpanded(new Set());
     setPage(0);
     cursorRef.current = { offset: 0, line: 0 };
@@ -268,6 +272,7 @@ function LogFollow({ session, info }: { session: string; info?: LiveSession }) {
           if (!live) return;
           cursorRef.current = { offset: log.offset, line: log.line };
           setFile(log.file);
+          setProvider(log.provider);
           // Skipped lines stay missing from the buffer, so the tally accumulates;
           // a restart replaces the buffer and the count starts over.
           setSkipped((prev) => (log.restarted ? log.skipped : prev + log.skipped));
@@ -341,7 +346,14 @@ function LogFollow({ session, info }: { session: string; info?: LiveSession }) {
       <div className="ju-chat-feed">
         {pageItems.length ? (
           pageItems.map((item) => (
-            <FeedRow key={item.key} item={item} expanded={expanded.has(item.key)} onToggle={() => toggle(item.key)} links={links} />
+            <FeedRow
+              key={item.key}
+              item={item}
+              expanded={expanded.has(item.key)}
+              onToggle={() => toggle(item.key)}
+              links={links}
+              assistantName={provider}
+            />
           ))
         ) : (
           <div className="ju-muted" style={{ fontSize: 12 }}>
@@ -393,7 +405,9 @@ export function LiveFeed() {
                   <span className={`ju-dot ${fresh ? "ju-fresh" : "ju-stale"}`} />
                   <span className="ju-session-main">
                     <span className="ju-mono">{shortId(s.session_id)}</span>
-                    <span className="ju-muted ju-clip">{s.project || s.first_prompt || ""}</span>
+                    <span className="ju-muted ju-clip">
+                      {s.provider} · {s.project || s.first_prompt || ""}
+                    </span>
                   </span>
                   <span className="ju-session-meta">
                     <span>{fmtInt(s.turns)} turns</span>

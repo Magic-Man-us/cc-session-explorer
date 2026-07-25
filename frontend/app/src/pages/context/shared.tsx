@@ -5,6 +5,7 @@ export const KIND_ACCENT: Record<ContextEvent["kind"], Accent> = {
   auto: "blue",
   user: "green",
   claude: "violet",
+  codex: "blue",
   hook: "amber",
   sub: "red",
 };
@@ -56,11 +57,12 @@ export const fmtBytes = (n: number) =>
 export const fmtWhen = (iso: string) => iso.slice(0, 16).replace("T", " ");
 
 export const matchesSession = (row: SessionRef, query: string): boolean =>
-  [row.session_id, row.project].join(" ").toLowerCase().includes(query.toLowerCase());
+  [row.session_id, row.project, row.provider].join(" ").toLowerCase().includes(query.toLowerCase());
 
 export const sessionExportColumns: ExportColumn<SessionRef>[] = [
   { header: "session_id", value: (r) => r.session_id },
   { header: "project", value: (r) => r.project },
+  { header: "provider", value: (r) => r.provider },
   { header: "size_bytes", value: (r) => r.size_bytes },
   { header: "last_modified", value: (r) => r.last_modified },
 ];

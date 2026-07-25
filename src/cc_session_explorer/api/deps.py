@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import Depends, Request
 
 from cc_session_explorer.paths import DATA_DIR_NAME, TRANSCRIPTS_DB_NAME
+from cc_session_explorer.sources import TranscriptRoots
 
 from .settings import ExplorerSettings
 
@@ -25,19 +26,19 @@ def get_explorer_settings(request: Request) -> ExplorerSettings:
     return settings
 
 
-def get_projects_root(request: Request) -> Path:
-    """The Claude Code projects directory the session timeline routes read from.
+def get_transcript_roots(request: Request) -> TranscriptRoots:
+    """The Claude Code and Codex transcript directories explorer routes read from.
 
     Args:
         request: The incoming request, carrying `state.explorer_settings` set at startup.
 
     Returns:
-        `<home>/.claude/projects` for the configured home dir.
+        Provider-aware roots derived from the configured home dir.
     """
-    return get_explorer_settings(request).home_dir / ".claude" / "projects"
+    return TranscriptRoots.for_home(get_explorer_settings(request).home_dir)
 
 
-ProjectsRootDep = Annotated[Path, Depends(get_projects_root)]
+TranscriptRootsDep = Annotated[TranscriptRoots, Depends(get_transcript_roots)]
 
 
 def get_transcripts_db(request: Request) -> Path:

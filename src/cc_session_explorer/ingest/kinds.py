@@ -14,9 +14,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from cc_session_core import parse_line
+from cc_session_core import CodexSession, parse_transcript_line
+from cc_session_core.codex.models import RolloutBase
 from pydantic import ValidationError
 
+from cc_session_explorer.sources import Provider
 from cc_session_explorer.timeline import record_kind_tokens
 
 if TYPE_CHECKING:
@@ -52,14 +54,17 @@ def derive_kinds(conn: sqlite3.Connection) -> int:
     for row in rows:
         highest = int(row["id"])
         try:
-            record = parse_line(row["raw"])
+            record = parse_transcript_line(row["raw"])
         except ValidationError:
             continue
-        for kind, tokens in record_kind_tokens(record):
-            bucket = totals.setdefault((str(row["source"]), str(kind.value)), [0, 0])
-            bucket[0] += 1
-            bucket[1] += tokens
-            folded += 1
+        normalized = CodexSession([record]).records if isinstance(record, RolloutBase) else [record]
+        provider: Provider = "codex" if isinstance(record, RolloutBase) else "claude"
+        for item in normalized:
+            for kind, tokens in record_kind_tokens(item, provider):
+                bucket = totals.setdefault((str(row["source"]), str(kind.value)), [0, 0])
+                bucket[0] += 1
+                bucket[1] += tokens
+                folded += 1
     conn.executemany(
         _UPSERT,
         [(source, kind, count, tokens) for (source, kind), (count, tokens) in totals.items()],

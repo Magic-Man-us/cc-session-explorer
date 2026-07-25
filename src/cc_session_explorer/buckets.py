@@ -11,6 +11,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Literal
 
+from cc_session_explorer.sources import project_from_storage_key
+
 Grain = Literal["weekly", "daily", "hourly", "five_minute"]
 
 _FIVE_MINUTES = 5
@@ -68,5 +70,5 @@ def project_name(source: str | None, project: str | None) -> str | None:
     transcript directory the rest of the app groups by.
     """
     if source:
-        return source.split("/")[0]
+        return project_from_storage_key(source)
     return project

@@ -5,8 +5,10 @@ from typing import Annotated
 
 from pydantic import Field
 
-from cc_session_explorer.types import CostUsd as CostUsd  # re-exported for this lens
-from cc_session_explorer.types import TokenCount as TokenCount  # re-exported for this lens
+from cc_session_explorer import types as explorer_types
+
+CostUsd = explorer_types.CostUsd
+TokenCount = explorer_types.TokenCount
 
 # The largest context window we render against by default (Opus/Sonnet 1M-class windows are
 # also valid; this is just the fallback ceiling for the stacked-bar view).
@@ -17,12 +19,12 @@ MILLION_WINDOW_TOKENS = 1_000_000
 
 
 class EventKind(StrEnum):
-    """What produced a context event — drives the colour band in the stacked-bar view. Mirrors
-    the kinds in Claude Code's own context-window explorer."""
+    """What produced a context event — drives the colour band in the stacked-bar view."""
 
     auto = "auto"  # loaded before the user types: system prompt, CLAUDE.md, memory, skills, MCP
     user = "user"  # a human turn
     claude = "claude"  # Claude's own work: responses, tool calls, file reads, command output
+    codex = "codex"  # Codex's responses, reasoning, tool calls, and tool output
     hook = "hook"  # a hook firing
     sub = "sub"  # a subagent's context (its own window)
 

@@ -1,8 +1,7 @@
-"""A local SQLite store for Claude Code transcript records
-(``~/.claude/projects/**/*.jsonl``).
+"""A local SQLite store for Claude Code and Codex transcript records.
 
-Records are parsed by ``cc_session_core`` (``parse_line`` over a discriminated union of typed
-records); ``ingest`` loads a whole corpus into a SQLite database incrementally, and
+Records are parsed by ``cc_session_core``'s shared discriminated union; ``ingest`` loads all
+configured provider roots into a SQLite database incrementally, and
 ``search`` runs full-text queries over it.
 """
 

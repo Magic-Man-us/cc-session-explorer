@@ -15,7 +15,6 @@ from pathlib import Path
 from cc_session_core import parse_line
 from pydantic import ValidationError
 
-from cc_session_explorer.buckets import bucket_span as bucket_span  # re-export: transcript.py
 from cc_session_explorer.buckets import project_name, session_key
 from cc_session_explorer.ingest import search_readonly
 from cc_session_explorer.ingest.rollup import DIMENSIONS
@@ -46,12 +45,14 @@ logger = logging.getLogger(__name__)
 
 _RECENT_SESSIONS_MAX = 40
 _PREVIEW_MAX = 200
-_SOURCE_NAME = "claude code transcripts (cc-session-core, stateless)"
+_SOURCE_NAME = "Claude Code + Codex transcripts (cc-session-core)"
 _NOTES = [
     "Costs are API-list estimates computed from transcript usage, not provider billing.",
     "Turns are deduplicated by request id within and across session files.",
-    "Usage is priced from the record archive, so a session whose transcript has been deleted "
-    "still counts.",
+    (
+        "Usage is priced from the record archive, so a session whose transcript has been deleted "
+        "still counts."
+    ),
 ]
 
 # The rollup dimension each time grain is accumulated under, and the usage_events column that
@@ -84,7 +85,7 @@ def _iso(value: object) -> str | None:
     if not isinstance(value, str) or not value:
         return None
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value)
     except ValueError:
         return None
     stamp = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
@@ -129,11 +130,11 @@ def _open(store_db: Path) -> sqlite3.Connection | None:
 
 
 def _dimension(conn: sqlite3.Connection, dimension: str, order: str) -> list[sqlite3.Row]:
-    return conn.execute(f"{_ROLLUP} ORDER BY {order}", (dimension,)).fetchall()  # noqa: S608
+    return conn.execute(f"{_ROLLUP} ORDER BY {order}", (dimension,)).fetchall()
 
 
 def _total(conn: sqlite3.Connection) -> sqlite3.Row | None:
-    return conn.execute(f"{_ROLLUP} AND r.key = ''", ("total",)).fetchone()  # noqa: S608
+    return conn.execute(f"{_ROLLUP} AND r.key = ''", ("total",)).fetchone()
 
 
 def _time_usage(rows: list[sqlite3.Row]) -> list[TimeUsage]:
@@ -184,7 +185,7 @@ def _source(row: sqlite3.Row | None, corpus: ScanResult, store_db: Path) -> Data
 
 def _recent_sessions(conn: sqlite3.Connection, store_db: Path) -> list[RecentSession]:
     rows = conn.execute(
-        f"{_ROLLUP} ORDER BY r.last_seen DESC LIMIT ?",  # noqa: S608
+        f"{_ROLLUP} ORDER BY r.last_seen DESC LIMIT ?",
         ("session", _RECENT_SESSIONS_MAX),
     ).fetchall()
     meta = session_meta(store_db, [str(row["key"]) for row in rows])
@@ -357,7 +358,7 @@ def build_bucket(store_db: Path, grain: str, bucket: str) -> BucketDetail | None
         )
     try:
         overall = conn.execute(
-            f"{_ROLLUP} AND r.key = ?",  # noqa: S608
+            f"{_ROLLUP} AND r.key = ?",
             (_GRAINS[grain], bucket),
         ).fetchone()
         if overall is None:
@@ -373,7 +374,7 @@ def build_bucket(store_db: Path, grain: str, bucket: str) -> BucketDetail | None
             " + cache_creation_unknown_tokens), 0) AS cache_creation_tokens,"
             " COUNT(*) AS turns, COALESCE(SUM(cost_usd), 0.0) AS cost_usd,"
             " MIN(timestamp) AS first_seen, MAX(timestamp) AS last_seen"
-            f" FROM usage_events WHERE {_GRAIN_COLUMNS[grain]} = ?"  # noqa: S608
+            f" FROM usage_events WHERE {_GRAIN_COLUMNS[grain]} = ?"
             " GROUP BY session_key ORDER BY cost_usd DESC",
             (bucket,),
         ).fetchall()
@@ -430,6 +431,7 @@ def build_live_sessions(store_db: Path, window_minutes: int) -> LiveSessions:
         sessions=[
             LiveSession(
                 session_id=str(row["key"]),
+                provider=meta[str(row["key"])].provider if str(row["key"]) in meta else "claude",
                 project=meta[str(row["key"])].project if str(row["key"]) in meta else "",
                 first_prompt=meta[str(row["key"])].first_prompt
                 if str(row["key"]) in meta
