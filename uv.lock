@@ -51,9 +51,13 @@ wheels = [
 [[package]]
 name = "cc-session-core"
 version = "0.2.0"
-source = { git = "https://github.com/Magic-Man-us/cc-session-core.git?rev=fc245abf08d28fd56c03d70ae0753aa603df5b39#fc245abf08d28fd56c03d70ae0753aa603df5b39" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0c/ce/0fc200df2ee4e2007229171c45bc7493b12b3537f7632636e6ce005ea13c/cc_session_core-0.2.0.tar.gz", hash = "sha256:82453571c349703207004a2cf0d4834c4b025101b0df004aa1253e65b5974964", size = 80173, upload-time = "2026-07-25T20:00:14.023Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/72/bb/c83f1a90815579659b7be56b999b3288895ebb5003c71aad583afe14f0ab/cc_session_core-0.2.0-py3-none-any.whl", hash = "sha256:163085c5f869f151386f90479acbadf1d9a533ce537003eb94b53830868d05fc", size = 66393, upload-time = "2026-07-25T20:00:12.523Z" },
 ]
 
 [[package]]
@@ -82,7 +86,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cc-session-core", git = "https://github.com/Magic-Man-us/cc-session-core.git?rev=fc245abf08d28fd56c03d70ae0753aa603df5b39" },
+    { name = "cc-session-core", specifier = ">=0.2.0,<0.3.0" },
     { name = "fastapi", specifier = ">=0.139.2" },
     { name = "mcp", specifier = ">=1.28" },
     { name = "pydantic", specifier = ">=2.11" },

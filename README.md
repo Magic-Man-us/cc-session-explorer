@@ -45,7 +45,7 @@ legacy data home, kept so existing installs and the systemd watcher carry over
 uv tool install cc-session-explorer
 ```
 
-From a checkout (`[tool.uv.sources]` pins the exact compatible core revision):
+From a checkout:
 
 ```sh
 uv sync --all-groups
