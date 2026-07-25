@@ -1,4 +1,4 @@
-"""Incremental ingest of ``~/.claude/projects/**/*.jsonl`` into the local SQLite store.
+"""Incremental ingest of Claude Code and Codex JSONL into the local SQLite store.
 
 Deterministic and model-free: every line is parsed by the typed models, projected onto the
 indexed columns, and inserted with its verbatim ``raw`` text and searchable prose. Ingest is
@@ -18,7 +18,13 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from cc_session_core import DEFAULT_PROJECTS_ROOT, Record, message_text, parse_line
+from cc_session_core import (
+    CodexSession,
+    TranscriptRecord,
+    message_text,
+    parse_transcript_line,
+)
+from cc_session_core.codex.models import RolloutBase, SessionMetaRecord
 from cc_session_core.models import (
     AssistantRecord,
     UserRecord,
@@ -42,7 +48,13 @@ from cc_session_explorer.ingest.types import (
     SessionId,
     TailOffset,
 )
-from cc_session_explorer.ingest.usage import derive_usage
+from cc_session_explorer.ingest.usage import derive_session_usage, derive_usage
+from cc_session_explorer.sources import (
+    TranscriptLocation,
+    TranscriptRoots,
+    coerce_roots,
+    source_identity,
+)
 
 if TYPE_CHECKING:
     import sqlite3
@@ -116,12 +128,18 @@ class _FileOutcome(FrozenModel):
     invalid_lines: RecordCount
 
 
-def searchable_text(record: Record) -> str:
+def searchable_text(record: TranscriptRecord) -> str:
     """The record's prose for full-text search: the message text of a conversation turn,
     empty for metadata records (which stay queryable by their columns and ``raw``).
     """
     if isinstance(record, AssistantRecord | UserRecord):
         return message_text(record.message)
+    if isinstance(record, RolloutBase):
+        return "\n".join(
+            message_text(item.message)
+            for item in CodexSession([record]).records
+            if isinstance(item, AssistantRecord | UserRecord)
+        )
     return ""
 
 
@@ -205,6 +223,8 @@ def _ingest_file(
     source: str,
     stored: _IngestState | None,
     stat: stat_result,
+    session_id: str | None = None,
+    cwd: str | None = None,
 ) -> _FileOutcome:
     tail = _read_tail(file, stored, stat) if stored is not None else None
     if stored is not None and tail is not None:
@@ -229,7 +249,7 @@ def _ingest_file(
     parse_errors = 0
     invalid_lines = 0
     # Each line is deliberately parsed twice — a permissive envelope projection (RecordRow)
-    # and the strict typed union (parse_line) — so the failure domains stay independent:
+    # and the strict typed union (parse_transcript_line) — so the failure domains stay independent:
     # a record kind the union can't parse still gets full columns + raw. Measured cost of
     # the second pass: ~0.5s per 150k lines, and only on changed tails.
     for offset, line in enumerate(insert_lines):
@@ -243,7 +263,7 @@ def _ingest_file(
             params.append((source, line_no, _INVALID_TYPE) + (None,) * 8 + (line, ""))
             continue
         try:
-            text = searchable_text(parse_line(line))
+            text = searchable_text(parse_transcript_line(line))
         except ValidationError:
             logger.warning("%s:%d failed typed parse — stored raw, no text", source, line_no)
             parse_errors += 1
@@ -255,10 +275,10 @@ def _ingest_file(
                 row.type,
                 row.uuid,
                 row.parent_uuid,
-                row.session_id,
+                row.session_id or session_id,
                 row.timestamp,
                 row.slug,
-                row.cwd,
+                row.cwd or cwd,
                 row.git_branch,
                 row.agent_id,
                 line,
@@ -289,21 +309,39 @@ def _ingest_file(
     )
 
 
-def ingest(conn: sqlite3.Connection, projects_root: Path = DEFAULT_PROJECTS_ROOT) -> IngestReport:
-    """Ingest every transcript under ``projects_root`` into ``conn``, incrementally.
+def ingest(
+    conn: sqlite3.Connection,
+    projects_root: TranscriptLocation | None = None,
+) -> IngestReport:
+    """Ingest every configured Claude Code and Codex transcript, incrementally.
 
     Files unchanged since the last run (same size and mtime) are skipped; the rest are read
     and their new records inserted. Each file's rows and its high-water mark commit together,
     so an interrupted run leaves a consistent store.
     """
-    files = sorted(projects_root.rglob("*.jsonl"))
+    location: TranscriptLocation = projects_root or TranscriptRoots.defaults()
+    roots = coerce_roots(location)
+    located_files = roots.files()
     files_ingested = 0
     files_skipped = 0
     inserted = 0
     parse_errors = 0
     invalid_lines = 0
-    for file in files:
-        source = str(file.relative_to(projects_root))
+    provider_usage = 0
+    for transcript_source, file in located_files:
+        if isinstance(location, Path):
+            source = str(file.relative_to(location))
+        else:
+            source = roots.storage_key(transcript_source, file)
+        session_id, _project = source_identity(transcript_source, file)
+        cwd: str | None = None
+        codex_session: CodexSession | None = None
+        if transcript_source.provider == "codex":
+            codex_session = CodexSession.load(file)
+            for item in codex_session.codex_records:
+                if isinstance(item, SessionMetaRecord) and item.payload.cwd:
+                    cwd = str(item.payload.cwd)
+                    break
         stat = file.stat()
         stored = _load_state(conn, source)
         unchanged = (
@@ -315,7 +353,17 @@ def ingest(conn: sqlite3.Connection, projects_root: Path = DEFAULT_PROJECTS_ROOT
             files_skipped += 1
             continue
         with conn:
-            outcome = _ingest_file(conn, file, source, stored, stat)
+            outcome = _ingest_file(
+                conn,
+                file,
+                source,
+                stored,
+                stat,
+                session_id,
+                cwd,
+            )
+        if codex_session is not None:
+            provider_usage += derive_session_usage(conn, codex_session, source)
         files_ingested += 1
         inserted += outcome.inserted
         parse_errors += outcome.parse_errors
@@ -324,10 +372,10 @@ def ingest(conn: sqlite3.Connection, projects_root: Path = DEFAULT_PROJECTS_ROOT
     # session whose file is gone by the next run, and the ledger's rollups are maintained here
     # so a request never has to replay the corpus to get them.
     derive_kinds(conn)
-    priced = derive_usage(conn)
+    priced = provider_usage + derive_usage(conn)
     derive_rollups(conn)
     return IngestReport(
-        files_total=len(files),
+        files_total=len(located_files),
         files_ingested=files_ingested,
         files_skipped=files_skipped,
         records_inserted=inserted,

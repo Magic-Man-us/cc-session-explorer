@@ -65,7 +65,7 @@ function pageDescription(page: Page): string {
     case "overview":
       return "Start with total spend, token flow, recent activity, and data-health signals.";
     case "live-feed":
-      return "Follow active Claude sessions and expand each message to inspect its tools and thinking.";
+      return "Follow active Claude Code and Codex sessions, including tools and reasoning.";
     case "sessions":
       return "Search historical sessions; select a session identifier to open its full context replay.";
     case "time":
@@ -212,7 +212,7 @@ export function App() {
       <Root className="cc-shell">
         <Sidebar
           brand="cc-session-explorer"
-          subtitle="Claude session intelligence"
+          subtitle="Claude + Codex intelligence"
           items={NAV}
           active={navKindFor(page)}
           onSelect={(kind) => go(pageForNavKind(kind))}

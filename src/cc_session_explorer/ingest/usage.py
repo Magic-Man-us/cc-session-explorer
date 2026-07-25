@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal, cast
 
-from cc_session_core import AssistantRecord, parse_line, request_key
+from cc_session_core import AssistantRecord, Session, parse_line, request_key
 from cc_session_core.types import FilePath
 from pydantic import BeforeValidator, JsonValue, TypeAdapter, ValidationError
 
@@ -70,7 +70,7 @@ def _timestamp(value: object) -> datetime | None:
     if raw is None:
         return None
     try:
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(raw)
     except ValueError:
         return None
     return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
@@ -295,6 +295,29 @@ def derive_usage(conn: sqlite3.Connection) -> int:
     conn.commit()
     if added:
         logger.info("priced %d new usage events", added)
+    return added
+
+
+def derive_session_usage(conn: sqlite3.Connection, session: Session, source: str) -> int:
+    """Insert normalized usage requests from a provider-aware parsed session.
+
+    Codex usage lives in ``event_msg`` records rather than Claude-shaped assistant lines.
+    ``CodexSession`` normalizes those counters into the same ``AssistantRecord`` model, so this
+    path shares the archive schema, rollups, and dedup key without teaching the explorer a
+    second accounting model. Re-reading a grown rollout is safe: usage keys are idempotent.
+    """
+    added = 0
+    for line_no, record in enumerate(session.assistant_requests(), start=1):
+        before = conn.total_changes
+        try:
+            usage_row = _usage_row(record, source, line_no)
+        except ValidationError:
+            logger.warning("%s:%d could not be priced — skipped", source, line_no)
+            continue
+        conn.execute(_INSERT_USAGE, usage_row.model_dump())
+        if conn.total_changes > before:
+            added += 1
+    conn.commit()
     return added
 
 

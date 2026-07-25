@@ -168,7 +168,7 @@ def test_rollups_agree_with_a_direct_aggregate(tmp_path: Path) -> None:
             truth = {
                 (str(row[0]), int(row[1]), round(float(row[2]), 6), int(row[3]))
                 for row in conn.execute(
-                    f"SELECT {column}, SUM(input_tokens + output_tokens), SUM(cost_usd),"  # noqa: S608
+                    f"SELECT {column}, SUM(input_tokens + output_tokens), SUM(cost_usd),"
                     f" COUNT(*) FROM usage_events GROUP BY {column}"
                 ).fetchall()
             }
@@ -187,7 +187,7 @@ def test_rollups_agree_with_a_direct_aggregate(tmp_path: Path) -> None:
             truth = {
                 (str(row[0]), int(row[1]))
                 for row in conn.execute(
-                    f"SELECT {column}, COUNT(DISTINCT session_key)"  # noqa: S608
+                    f"SELECT {column}, COUNT(DISTINCT session_key)"
                     f" FROM usage_events GROUP BY {column}"
                 ).fetchall()
             }

@@ -1,7 +1,7 @@
-"""Replays Claude Code session transcripts and Claude.ai exports as context-token timelines.
+"""Explores Claude Code, Codex, and Claude.ai export transcripts as context-token timelines.
 
-Transcript replay is built on the ``cc_session_core`` boundary parser; the explorer maps each typed
-record to a ``ContextEvent`` and rolls those up into timelines, ledgers, and project breakdowns.
+Replay is built on ``cc_session_core``'s shared provider union; the explorer maps normalized
+records to ``ContextEvent`` objects and rolls them into timelines, ledgers, and projects.
 """
 
 from __future__ import annotations

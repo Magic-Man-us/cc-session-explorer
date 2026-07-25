@@ -3,10 +3,20 @@ from __future__ import annotations
 import logging
 import sqlite3
 from collections import OrderedDict
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
-from cc_session_core import ParseFailure, iter_records, parse_tool_input, tool_result_text
+from cc_session_core import (
+    ParseFailure,
+    Session,
+    iter_records,
+    iter_transcript_records,
+    parse_tool_input,
+    tool_result_text,
+)
+from cc_session_core.codex.models import RolloutBase
 from cc_session_core.models import (
     AssistantRecord,
     AttachmentRecord,
@@ -56,6 +66,13 @@ from .models import (
     SourceKind,
 )
 from .paths import SAFE_SESSION_ID, resolve_session_path
+from .sources import (
+    Provider,
+    TranscriptLocation,
+    codex_identity,
+    coerce_roots,
+    source_identity,
+)
 from .tokens import estimate_tokens
 
 logger = logging.getLogger(__name__)
@@ -174,11 +191,14 @@ def _attachment_events(record: AttachmentRecord) -> list[_SourcedEvent]:
     return [(event, text)]
 
 
-def _assistant_events(record: AssistantRecord) -> list[_SourcedEvent]:
+def _assistant_events(
+    record: AssistantRecord, provider: Provider = "claude"
+) -> list[_SourcedEvent]:
     """Timeline events for one assistant turn's content blocks, each with its source text. A
     tool_use records its id→label into no shared state here — naming happens in `_entry_events`,
     which owns the running `tool_names`."""
-    base = EventKind.sub if record.is_sidechain else EventKind.claude
+    base = EventKind.sub if record.is_sidechain else EventKind(provider)
+    response_label = "Claude's response" if provider == "claude" else "Codex response"
     events: list[_SourcedEvent] = []
     for block in record.message.content:
         match block:
@@ -198,7 +218,7 @@ def _assistant_events(record: AssistantRecord) -> list[_SourcedEvent]:
                         (
                             ContextEvent(
                                 kind=base,
-                                label=f"Claude's response: {_text_brief(block.text)}",
+                                label=f"{response_label}: {_text_brief(block.text)}",
                                 tokens=estimate_tokens(block.text),
                             ),
                             block.text,
@@ -216,7 +236,9 @@ def _record_tool_names(record: AssistantRecord, tool_names: dict[str, str]) -> N
             tool_names[block.id] = _tool_brief(block)
 
 
-def _user_events(record: UserRecord, tool_names: dict[str, str]) -> list[_SourcedEvent]:
+def _user_events(
+    record: UserRecord, tool_names: dict[str, str], provider: Provider = "claude"
+) -> list[_SourcedEvent]:
     """Events for one user turn — a plain prompt, or the tool results it carries back — each with
     its source text."""
     content = record.message.content
@@ -226,10 +248,22 @@ def _user_events(record: UserRecord, tool_names: dict[str, str]) -> list[_Source
             kind=kind, label=f"Your prompt: {_text_brief(content)}", tokens=estimate_tokens(content)
         )
         return [(event, content)]
-    base = EventKind.sub if record.is_sidechain else EventKind.claude
+    base = EventKind.sub if record.is_sidechain else EventKind(provider)
     events: list[_SourcedEvent] = []
     for block in content:
-        if isinstance(block, ToolResultBlock):
+        if isinstance(block, TextBlock) and block.text:
+            kind = EventKind.sub if record.is_sidechain else EventKind.user
+            events.append(
+                (
+                    ContextEvent(
+                        kind=kind,
+                        label=f"Your prompt: {_text_brief(block.text)}",
+                        tokens=estimate_tokens(block.text),
+                    ),
+                    block.text,
+                )
+            )
+        elif isinstance(block, ToolResultBlock):
             label = tool_names.get(block.tool_use_id, "Tool result")
             text = tool_result_text(block.content)
             events.append(
@@ -239,7 +273,9 @@ def _user_events(record: UserRecord, tool_names: dict[str, str]) -> list[_Source
 
 
 def _record_events(
-    record: Record | ParseFailure, tool_names: dict[str, str]
+    record: Record | ParseFailure,
+    tool_names: dict[str, str],
+    provider: Provider = "claude",
 ) -> list[_SourcedEvent]:
     """Events one transcript record contributes, each with its source text; `tool_names` accrues
     tool_use id→label so a later tool_result can be named. Non-context records (session metadata,
@@ -248,15 +284,17 @@ def _record_events(
         case AttachmentRecord():
             return _attachment_events(record)
         case UserRecord():
-            return _user_events(record, tool_names)
+            return _user_events(record, tool_names, provider)
         case AssistantRecord():
             _record_tool_names(record, tool_names)
-            return _assistant_events(record)
+            return _assistant_events(record, provider)
         case _:
             return []
 
 
-def record_kind_tokens(record: Record | ParseFailure) -> list[tuple[EventKind, int]]:
+def record_kind_tokens(
+    record: Record | ParseFailure, provider: Provider = "claude"
+) -> list[tuple[EventKind, int]]:
     """The (kind, tokens) each event of one record contributes, in isolation.
 
     Only an event's *label* needs the running tool_use id→name state a full replay carries; its
@@ -264,11 +302,22 @@ def record_kind_tokens(record: Record | ParseFailure) -> list[tuple[EventKind, i
     record — which is what lets the ledger be maintained at ingest instead of replaying every
     transcript per request.
     """
-    return [(event.kind, event.tokens) for event, _ in _record_events(record, {})]
+    return [(event.kind, event.tokens) for event, _ in _record_events(record, {}, provider)]
+
+
+def _provider_records(path: Path) -> tuple[Provider, Iterable[Record | ParseFailure]]:
+    """Detect through core's shared union, retaining Claude's non-deduplicating stream."""
+    first = next(
+        (item for item in iter_transcript_records(path) if not isinstance(item, ParseFailure)),
+        None,
+    )
+    if isinstance(first, RolloutBase):
+        return "codex", Session.load(path).records
+    return "claude", iter_records(path)
 
 
 def from_transcript(path: Path, window_tokens: int | None = None) -> ContextTimeline:
-    """Replay a real Claude Code session transcript as a context timeline.
+    """Replay a Claude Code or Codex transcript as a context timeline.
 
     Tokens are estimated from each event's own text (≈4 chars/token); the transcript's real
     `usage` blocks aren't required for the shape and are reserved for a later calibration pass.
@@ -280,10 +329,11 @@ def from_transcript(path: Path, window_tokens: int | None = None) -> ContextTime
     Returns:
         The timeline, source-kind `session`, labelled with the file stem.
     """
+    provider, records = _provider_records(path)
     tool_names: dict[str, str] = {}
     events: list[ContextEvent] = []
-    for record in iter_records(path):  # stream — transcripts can run to tens of MB
-        events.extend(event for event, _ in _record_events(record, tool_names))
+    for record in records:
+        events.extend(event for event, _ in _record_events(record, tool_names, provider))
 
     return ContextTimeline(
         source_kind=SourceKind.session,
@@ -307,10 +357,11 @@ def inspect_event(path: Path, index: int) -> EventInspection | None:
     Returns:
         The inspection, or None when `index` is past the end of the chain.
     """
+    provider, records = _provider_records(path)
     tool_names: dict[str, str] = {}
     cursor = 0
-    for record in iter_records(path):  # stream — transcripts can run to tens of MB
-        for event, text in _record_events(record, tool_names):  # one record yields many events
+    for record in records:
+        for event, text in _record_events(record, tool_names, provider):
             if cursor == index:
                 return EventInspection(
                     index=index,
@@ -323,8 +374,8 @@ def inspect_event(path: Path, index: int) -> EventInspection | None:
     return None
 
 
-def discover_sessions(projects_root: Path) -> list[SessionRef]:
-    """List session transcripts under a Claude Code projects root, newest first.
+def discover_sessions(roots: TranscriptLocation) -> list[SessionRef]:
+    """List Claude Code and Codex session transcripts, newest first.
 
     Args:
         projects_root: The `~/.claude/projects` directory holding `<project>/<id>.jsonl` files.
@@ -332,17 +383,20 @@ def discover_sessions(projects_root: Path) -> list[SessionRef]:
     Returns:
         One ref per transcript, most-recently-modified first; `[]` if the root is absent.
     """
-    if not projects_root.is_dir():
-        return []
     found: list[tuple[float, SessionRef]] = []
-    for path in projects_root.glob("*/*.jsonl"):
+    seen: set[tuple[Provider, str]] = set()
+    for source, path in coerce_roots(roots).files():
         # only list ids resolve_session will accept, so the UI never offers an always-404 session
-        if not path.is_file() or not SAFE_SESSION_ID.fullmatch(path.stem):
+        session_id, project = source_identity(source, path)
+        identity = (source.provider, session_id)
+        if not SAFE_SESSION_ID.fullmatch(session_id) or identity in seen:
             continue
+        seen.add(identity)
         stat = path.stat()
         ref = SessionRef(
-            session_id=path.stem,
-            project=path.parent.name,
+            session_id=session_id,
+            project=project,
+            provider=source.provider,
             size_bytes=stat.st_size,
             last_modified=_iso_mtime(stat.st_mtime),
         )
@@ -350,8 +404,8 @@ def discover_sessions(projects_root: Path) -> list[SessionRef]:
     return [ref for _, ref in sorted(found, key=lambda item: item[0], reverse=True)]
 
 
-def resolve_session(projects_root: Path, session_id: str) -> Path | None:
-    """Resolve a session id to its transcript path, confined to `projects_root`.
+def resolve_session(roots: TranscriptLocation, session_id: str) -> Path | None:
+    """Resolve a session id to its transcript path, confined to configured roots.
 
     A session id that isn't a clean token, or that resolves outside the root, returns None —
     so a hostile id can neither traverse the filesystem nor widen the glob.
@@ -363,7 +417,7 @@ def resolve_session(projects_root: Path, session_id: str) -> Path | None:
     Returns:
         The transcript path, or None when no safe match exists.
     """
-    return resolve_session_path(projects_root, session_id)
+    return resolve_session_path(roots, session_id)
 
 
 # --- grouping + project breakdown -----------------------------------------------------
@@ -392,7 +446,7 @@ def _category(event: ContextEvent) -> str:
         return _CATEGORY_BY_PREFIX[head]
     if head == "Your prompt":
         return "Your prompts"
-    if head == "Claude's response":
+    if head in {"Claude response", "Claude's response", "Codex response"}:
         return "Responses"
     return event.label
 
@@ -457,6 +511,14 @@ _KINDS_CACHE_MAX = 512
 DEFAULT_PROJECT_LIMIT = 50
 
 
+@dataclass(frozen=True)
+class ProjectSelection:
+    """Provider-spanning transcripts that share one human project label."""
+
+    project: str
+    sessions: tuple[tuple[Provider, Path], ...]
+
+
 class _LedgerAccumulator:
     """A ledger bucket under construction — mutable counters, folded into a `LedgerBucket`."""
 
@@ -479,7 +541,7 @@ def _timestamp_date(value: object) -> date | None:
     if not isinstance(value, str) or not value:
         return None
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value)
     except ValueError:
         return None
     stamp = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
@@ -624,7 +686,7 @@ def build_ledger(db_path: Path, period: LedgerPeriod) -> LedgerView:
 
 
 def from_project(
-    project_dir: Path,
+    project_dir: Path | ProjectSelection,
     window_tokens: int | None = None,
     limit: int | None = DEFAULT_PROJECT_LIMIT,
 ) -> ProjectBreakdown:
@@ -646,22 +708,32 @@ def from_project(
     """
     summaries: list[SessionSummary] = []
     aggregate: dict[EventKind, list[int]] = {}
-    if project_dir.is_dir():
-        paths = [
-            p
-            for p in sorted(
-                project_dir.glob("*.jsonl"), key=lambda p: p.stat().st_size, reverse=True
-            )
-            if p.is_file() and SAFE_SESSION_ID.fullmatch(p.stem)
-        ]
-        for path in paths if limit is None else paths[:limit]:
+    located: list[tuple[Provider, Path]]
+    if isinstance(project_dir, ProjectSelection):
+        project_name = project_dir.project
+        located = list(project_dir.sessions)
+    else:
+        project_name = project_dir.name
+        located = (
+            [("claude", path) for path in project_dir.glob("*.jsonl") if path.is_file()]
+            if project_dir.is_dir()
+            else []
+        )
+    located.sort(key=lambda item: item[1].stat().st_size, reverse=True)
+    selected = located if limit is None else located[:limit]
+    for provider, path in selected:
+        session_id = path.stem
+        if provider == "codex":
+            session_id, _ = codex_identity(path)
+        if SAFE_SESSION_ID.fullmatch(session_id):
             kinds = _session_kinds(path)
             stat = path.stat()
             summaries.append(
                 SessionSummary(
                     ref=SessionRef(
-                        session_id=path.stem,
-                        project=project_dir.name,
+                        session_id=session_id,
+                        project=project_name,
+                        provider=provider,
                         size_bytes=stat.st_size,
                         last_modified=_iso_mtime(stat.st_mtime),
                     ),
@@ -679,15 +751,15 @@ def from_project(
     ]
     overview.sort(key=lambda summary: summary.tokens, reverse=True)
     return ProjectBreakdown(
-        project=project_dir.name,
+        project=project_name,
         aggregate=overview,
         sessions=summaries,
         **({"window_tokens": window_tokens} if window_tokens else {}),
     )
 
 
-def discover_projects(projects_root: Path) -> list[ProjectRef]:
-    """List the projects (transcript directories) under a projects root, largest first.
+def discover_projects(roots: TranscriptLocation) -> list[ProjectRef]:
+    """List projects across Claude Code and Codex transcripts, largest first.
 
     Args:
         projects_root: The `~/.claude/projects` directory holding `<project>/<id>.jsonl` files.
@@ -696,23 +768,21 @@ def discover_projects(projects_root: Path) -> list[ProjectRef]:
         One ref per project that holds at least one transcript, most bytes first; `[]` if the root
         is absent.
     """
-    if not projects_root.is_dir():
-        return []
-    refs: list[ProjectRef] = []
-    for entry in projects_root.iterdir():
-        if not entry.is_dir():
-            continue
-        sizes = [p.stat().st_size for p in entry.glob("*.jsonl") if p.is_file()]
-        if sizes:
-            refs.append(
-                ProjectRef(project=entry.name, session_count=len(sizes), total_bytes=sum(sizes))
-            )
+    totals: dict[str, list[int]] = {}
+    for ref in discover_sessions(roots):
+        bucket = totals.setdefault(ref.project, [0, 0])
+        bucket[0] += 1
+        bucket[1] += ref.size_bytes
+    refs = [
+        ProjectRef(project=project, session_count=count, total_bytes=size)
+        for project, (count, size) in totals.items()
+    ]
     refs.sort(key=lambda ref: ref.total_bytes, reverse=True)
     return refs
 
 
-def resolve_project(projects_root: Path, project: str) -> Path | None:
-    """Resolve a project name to its directory, confined to `projects_root`.
+def resolve_project(roots: TranscriptLocation, project: str) -> Path | ProjectSelection | None:
+    """Resolve a project label to its provider-spanning transcript selection.
 
     A name that isn't a clean token, or that resolves outside the root, returns None — so a hostile
     name can neither traverse the filesystem nor widen the glob.
@@ -724,10 +794,19 @@ def resolve_project(projects_root: Path, project: str) -> Path | None:
     Returns:
         The project directory, or None when no safe match exists.
     """
-    if project in (".", "..") or not SAFE_SESSION_ID.fullmatch(project):
+    if project in (".", ".."):
         return None
-    candidate = projects_root / project
-    root = projects_root.resolve()
-    if candidate.is_dir() and candidate.resolve().is_relative_to(root):
-        return candidate
-    return None
+    if isinstance(roots, Path):
+        if not SAFE_SESSION_ID.fullmatch(project):
+            return None
+        candidate = roots / project
+        root = roots.resolve()
+        if candidate.is_dir() and candidate.resolve().is_relative_to(root):
+            return candidate
+        return None
+    found: list[tuple[Provider, Path]] = []
+    for source, path in roots.files():
+        _session_id, found_project = source_identity(source, path)
+        if found_project == project:
+            found.append((source.provider, path))
+    return ProjectSelection(project, tuple(found)) if found else None

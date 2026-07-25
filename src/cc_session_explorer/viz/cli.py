@@ -1,4 +1,4 @@
-"""``cc-session-sankey`` — render a Claude Code session to a self-contained Sankey page."""
+"""``cc-session-sankey`` — render a Claude Code or Codex session as a Sankey page."""
 
 from __future__ import annotations
 
@@ -6,30 +6,27 @@ import argparse
 import webbrowser
 from pathlib import Path
 
-from cc_session_core import DEFAULT_PROJECTS_ROOT, Session, resolve_session_file
+from cc_session_core import Session, default_session_files, resolve_session_file
 
 from .sankey import build_page
 
 
 def _resolve(target: str | None) -> Path:
-    """A .jsonl path as-is, a session id/prefix looked up under ~/.claude/projects,
-    or the most-recently-modified session when omitted."""
+    """A path or id across both providers, or the newest active session when omitted."""
     if target:
         path = resolve_session_file(target)
         if path is None:
             raise SystemExit(f"no session file found for {target!r}")
         return path
-    sessions = sorted(
-        DEFAULT_PROJECTS_ROOT.rglob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True
-    )
+    sessions = sorted(default_session_files(), key=lambda p: p.stat().st_mtime, reverse=True)
     if not sessions:
-        raise SystemExit(f"no sessions found under {DEFAULT_PROJECTS_ROOT}")
+        raise SystemExit("no Claude Code or Codex sessions found")
     return sessions[0]
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Render a Claude Code session to a self-contained Sankey HTML page."
+        description="Render a Claude Code or Codex session to a self-contained Sankey HTML page."
     )
     parser.add_argument(
         "session",

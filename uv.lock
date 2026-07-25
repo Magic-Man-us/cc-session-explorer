@@ -50,14 +50,14 @@ wheels = [
 
 [[package]]
 name = "cc-session-core"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/62/7a/5e36cc0463118ad1dcc756616ce418709e47da13c488f599ea1be04e85f8/cc_session_core-0.1.0.tar.gz", hash = "sha256:fad275cad78dd9ebfb4df2a1b3729bceaf6d68101e892b8ba83e062571882f16", size = 66129, upload-time = "2026-07-18T21:05:10.061Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0c/ce/0fc200df2ee4e2007229171c45bc7493b12b3537f7632636e6ce005ea13c/cc_session_core-0.2.0.tar.gz", hash = "sha256:82453571c349703207004a2cf0d4834c4b025101b0df004aa1253e65b5974964", size = 80173, upload-time = "2026-07-25T20:00:14.023Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d4/68/c0d4b7bf3b7bd4664e23a8f30277976d29d17abf7925097f612973cc37ac/cc_session_core-0.1.0-py3-none-any.whl", hash = "sha256:11e25a7468e584f4cb25831e7b0ac88d0e732461acb9578b656f515d0be48acd", size = 54311, upload-time = "2026-07-18T21:05:08.879Z" },
+    { url = "https://files.pythonhosted.org/packages/72/bb/c83f1a90815579659b7be56b999b3288895ebb5003c71aad583afe14f0ab/cc_session_core-0.2.0-py3-none-any.whl", hash = "sha256:163085c5f869f151386f90479acbadf1d9a533ce537003eb94b53830868d05fc", size = 66393, upload-time = "2026-07-25T20:00:12.523Z" },
 ]
 
 [[package]]
@@ -86,7 +86,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cc-session-core", specifier = ">=0.1.0,<0.2.0" },
+    { name = "cc-session-core", specifier = ">=0.2.0,<0.3.0" },
     { name = "fastapi", specifier = ">=0.139.2" },
     { name = "mcp", specifier = ">=1.28" },
     { name = "pydantic", specifier = ">=2.11" },

@@ -1,4 +1,4 @@
-"""Self-contained HTML flow-graph (Sankey) reports over Claude Code sessions."""
+"""Self-contained HTML flow-graph reports over Claude Code and Codex sessions."""
 
 from __future__ import annotations
 

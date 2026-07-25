@@ -1,4 +1,4 @@
-"""Live capture: watch ``~/.claude/projects`` and ingest transcript writes as they land.
+"""Live capture: watch Claude Code and Codex roots and ingest writes as they land.
 
 One long-lived watcher owns the database writes. Filesystem events — filtered to
 ``*.jsonl`` in the Rust layer, batched and debounced by ``watchfiles`` — trigger the same
@@ -13,11 +13,11 @@ import argparse
 import logging
 from typing import TYPE_CHECKING
 
-from cc_session_core import DEFAULT_PROJECTS_ROOT
 from watchfiles import watch
 
 from cc_session_explorer.ingest.db import connect, default_db_path
 from cc_session_explorer.ingest.ingest import ingest
+from cc_session_explorer.sources import TranscriptLocation, TranscriptRoots, coerce_roots
 
 if TYPE_CHECKING:
     import threading
@@ -36,7 +36,7 @@ def _is_transcript(_change: Change, path: str) -> bool:
 
 def watch_forever(
     db_path: Path,
-    projects_root: Path = DEFAULT_PROJECTS_ROOT,
+    projects_root: TranscriptLocation | None = None,
     *,
     stop_event: threading.Event | None = None,
     debounce_ms: int = _DEBOUNCE_MS,
@@ -46,22 +46,28 @@ def watch_forever(
     Runs until ``stop_event`` is set (or forever without one). Owns its own connection —
     the single writer — so it can run on any thread.
     """
+    location: TranscriptLocation = projects_root or TranscriptRoots.defaults()
+    roots = coerce_roots(location)
     conn = connect(db_path)
     try:
-        report = ingest(conn, projects_root)
+        report = ingest(conn, location)
         logger.info(
             "caught up: +%d records from %d files (%d unchanged)",
             report.records_inserted,
             report.files_ingested,
             report.files_skipped,
         )
+        directories = roots.existing_directories()
+        if not directories:
+            logger.warning("no transcript directories exist yet")
+            return
         for _changes in watch(
-            projects_root,
+            *directories,
             watch_filter=_is_transcript,
             debounce=debounce_ms,
             stop_event=stop_event,
         ):
-            report = ingest(conn, projects_root)
+            report = ingest(conn, location)
             if report.records_inserted:
                 logger.info(
                     "+%d records from %d files",
@@ -75,11 +81,14 @@ def watch_forever(
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="cc-session-watch",
-        description="Watch ~/.claude/projects and ingest transcript writes live.",
+        description="Watch Claude Code and Codex transcript roots and ingest writes live.",
     )
     parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
-    print(f"watching {DEFAULT_PROJECTS_ROOT} -> {default_db_path()}  (Ctrl+C stops)")
+    watched = ", ".join(str(path) for path in TranscriptRoots.defaults().existing_directories())
+    print(
+        f"watching {watched or 'configured transcript roots'} -> {default_db_path()}  (Ctrl+C stops)"
+    )
     try:
         watch_forever(default_db_path())
     except KeyboardInterrupt:

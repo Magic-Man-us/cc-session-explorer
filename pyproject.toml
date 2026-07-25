@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "cc-session-explorer"
 version = "0.1.0"
-description = "Replays Claude Code session transcripts and Claude.ai exports as context-token timelines, ledgers, and project breakdowns — a FastAPI service over cc-session-core."
+description = "Explores Claude Code and Codex transcripts as context timelines, usage ledgers, and project breakdowns."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -21,7 +21,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "cc-session-core>=0.1.0,<0.2.0",
+    "cc-session-core>=0.2.0,<0.3.0",
     "fastapi>=0.139.2",
     "mcp>=1.28",
     "pydantic>=2.11",

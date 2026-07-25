@@ -81,6 +81,7 @@ jobs:
         run: |
           uv run pytest \
             --junitxml=junit.xml \
+            -o junit_family=legacy \
             --cov=cc_session_explorer \
             --cov-report=xml
 
@@ -99,7 +100,8 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: Magic-Man-us/cc-session-explorer
-          files: junit.xml
+          files: ./junit.xml
+          disable_search: true
           report_type: test_results
           flags: python-${{ matrix.python-version }}
 

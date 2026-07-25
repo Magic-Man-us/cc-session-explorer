@@ -7,11 +7,14 @@
 [![Dependabot](https://img.shields.io/badge/Dependabot-enabled-brightgreen.svg)](https://github.com/Magic-Man-us/cc-session-explorer/blob/main/.github/dependabot.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/Magic-Man-us/cc-session-explorer/blob/main/LICENSE)
 
-Replays Claude Code session transcripts and Claude.ai exports as context-token
-timelines, cost ledgers, and project breakdowns — a FastAPI dashboard, CLI tools,
-and an MCP server built on [cc-session-core](https://github.com/Magic-Man-us/cc-session-core),
-which owns the transcript parsing boundary. This package maps each typed record to
-presentation-layer models and renders them.
+Explores Claude Code and Codex session transcripts, plus Claude.ai exports, as context-token
+timelines, cost ledgers, and project breakdowns. The FastAPI dashboard, CLI tools, and MCP
+server are built on [cc-session-core](https://github.com/Magic-Man-us/cc-session-core), which
+auto-detects both transcript providers behind one typed session model.
+
+By default the explorer discovers Claude sessions under `~/.claude/projects` and active plus
+archived Codex rollouts under `~/.codex/{sessions,archived_sessions}`. Setting
+`CC_SESSION_EXPLORER_HOME_DIR` consistently rebases all three roots.
 
 ## Layout
 
@@ -42,8 +45,7 @@ legacy data home, kept so existing installs and the systemd watcher carry over
 uv tool install cc-session-explorer
 ```
 
-From a checkout (the sibling `cc-session-core` repo must sit next to this one —
-`[tool.uv.sources]` wires it up editable for development):
+From a checkout:
 
 ```sh
 uv sync --all-groups
@@ -54,7 +56,7 @@ uv sync --all-groups
 | Command | What it does |
 | --- | --- |
 | `cc-session-explorer` | FastAPI dashboard: SPA at `/`, cost lens at `/api/*`, context lens at `/timeline/*`, on 127.0.0.1:9821 |
-| `cc-session-watch` | Live transcript watcher; ingests `~/.claude/projects` into SQLite |
+| `cc-session-watch` | Live watcher; ingests Claude and active/archived Codex transcripts into SQLite |
 | `cc-session-history` | Refreshes the historical usage ledger |
 | `cc-session-sankey` | Per-session token-flow Sankey as a self-contained HTML page |
 | `cc-session-ledger` | Directory-wide cost ledger as a self-contained HTML page |
@@ -146,7 +148,7 @@ uv run pyright
 ```
 
 Publishing order: `cc-session-core` goes to PyPI first; this package depends on
-`cc-session-core>=0.1.0,<0.2.0`.
+`cc-session-core>=0.2.0,<0.3.0`.
 
 ## License
 

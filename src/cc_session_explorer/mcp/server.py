@@ -48,6 +48,7 @@ from ..models import (
     WindowTokens,
 )
 from ..paths import DATA_DIR_NAME
+from ..sources import TranscriptRoots
 from ..timeline import (
     build_ledger,
     discover_projects,
@@ -84,7 +85,7 @@ def build_server(settings: ExplorerSettings | None = None) -> FastMCP:
         A `FastMCP` server with one tool per `/timeline/*` capability.
     """
     resolved = settings if settings is not None else ExplorerSettings()
-    projects_root = resolved.home_dir / ".claude" / "projects"
+    transcript_roots = TranscriptRoots.for_home(resolved.home_dir)
     export_path = resolved.export_path
     transcripts_db = resolved.home_dir / DATA_DIR_NAME / "transcripts.db"
 
@@ -95,17 +96,17 @@ def build_server(settings: ExplorerSettings | None = None) -> FastMCP:
     @server.tool()
     def list_timeline_sessions() -> str:
         """The recorded sessions the context explorer can replay, newest first."""
-        return _SESSION_LIST.dump_json(discover_sessions(projects_root)).decode()
+        return _SESSION_LIST.dump_json(discover_sessions(transcript_roots)).decode()
 
     @server.tool()
     def list_projects() -> str:
         """The recorded projects the explorer can break down, largest first."""
-        return _PROJECT_LIST.dump_json(discover_projects(projects_root)).decode()
+        return _PROJECT_LIST.dump_json(discover_projects(transcript_roots)).decode()
 
     @server.tool()
     def get_session_timeline(session_id: SourceLabel, window: WindowTokens | None = None) -> str:
         """Replay one recorded session as a context timeline; errors when the id has no transcript."""
-        path = resolve_session(projects_root, session_id)
+        path = resolve_session(transcript_roots, session_id)
         if path is None:
             raise ToolError("session not found")
         return from_transcript(path, window).model_dump_json()
@@ -114,7 +115,7 @@ def build_server(settings: ExplorerSettings | None = None) -> FastMCP:
     def get_grouped_events(session_id: SourceLabel) -> str:
         """The grouped, expandable full chain of one session — like events collapsed into
         categories, each carrying its members; errors when the id has no transcript."""
-        path = resolve_session(projects_root, session_id)
+        path = resolve_session(transcript_roots, session_id)
         if path is None:
             raise ToolError("session not found")
         return _EVENT_GROUP_LIST.dump_json(group_events(from_transcript(path).events)).decode()
@@ -123,7 +124,7 @@ def build_server(settings: ExplorerSettings | None = None) -> FastMCP:
     def inspect_session_event(session_id: SourceLabel, index: EventIndex) -> str:
         """One event of a recorded session paired with the raw text it was derived from; errors
         when the id has no transcript or the index is past the end of the chain."""
-        path = resolve_session(projects_root, session_id)
+        path = resolve_session(transcript_roots, session_id)
         if path is None:
             raise ToolError("session not found")
         inspection = inspect_event(path, index)
@@ -139,7 +140,7 @@ def build_server(settings: ExplorerSettings | None = None) -> FastMCP:
     ) -> str:
         """Break a whole project fully down — per-kind overview + per-session summaries; errors
         when the project doesn't exist. `limit` caps how many of the largest sessions are read."""
-        project_dir = resolve_project(projects_root, project)
+        project_dir = resolve_project(transcript_roots, project)
         if project_dir is None:
             raise ToolError("project not found")
         if limit is None:
@@ -170,7 +171,7 @@ def build_server(settings: ExplorerSettings | None = None) -> FastMCP:
     def get_sankey(session_id: SourceLabel) -> str:
         """Render one session as a self-contained Sankey token/cost-flow HTML page; errors when the
         id has no transcript."""
-        path = resolve_session(projects_root, session_id)
+        path = resolve_session(transcript_roots, session_id)
         if path is None:
             raise ToolError("session not found")
         return build_page(Session.load(path))

@@ -24,7 +24,7 @@ from typing import Literal
 from cc_session_core import ModelPrice, Session, cost_breakdown_for, price_for_usage
 from cc_session_core import types as t
 from cc_session_core.models import AssistantRecord, SnakeModel, Usage
-from pydantic import TypeAdapter
+from pydantic import Field, TypeAdapter
 
 from . import types as vt
 from .htmlshell import StatTile, assign_colors, render_page, safe_json
@@ -51,16 +51,16 @@ class SankeyLink(SnakeModel):
 class SankeyGraph(SnakeModel):
     title: vt.SankeyTitle
     unit: FlowUnit
-    nodes: list[SankeyNode] = []
-    links: list[SankeyLink] = []
+    nodes: list[SankeyNode] = Field(default_factory=lambda: list[SankeyNode]())
+    links: list[SankeyLink] = Field(default_factory=lambda: list[SankeyLink]())
 
 
 class SessionPage(SnakeModel):
     """Everything the HTML page renders: header stats and the flow graphs."""
 
     title: vt.SankeyTitle
-    stats: list[StatTile] = []
-    graphs: list[SankeyGraph] = []
+    stats: list[StatTile] = Field(default_factory=lambda: list[StatTile]())
+    graphs: list[SankeyGraph] = Field(default_factory=lambda: list[SankeyGraph]())
 
 
 # --------------------------------------------------------------------------- #
