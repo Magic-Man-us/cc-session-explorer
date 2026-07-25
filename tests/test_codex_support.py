@@ -4,8 +4,10 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
+import cc_session_explorer.usage.aggregate as usage_aggregate
 from cc_session_explorer.api import ExplorerSettings
 from cc_session_explorer.ingest import connect, ingest, search
 from cc_session_explorer.models import EventKind
@@ -13,6 +15,7 @@ from cc_session_explorer.paths import DATA_DIR_NAME
 from cc_session_explorer.sources import TranscriptRoots
 from cc_session_explorer.timeline import discover_sessions, from_transcript, resolve_session
 from cc_session_explorer.usage.livelog import build_session_log
+from cc_session_explorer.usage.scan import SessionScan
 from cc_session_explorer.webapp import create_app
 
 _SESSION_ID = "019c0000-0000-7000-8000-000000000001"
@@ -315,3 +318,62 @@ def test_provider_scope_filters_every_provider_spanning_api(tmp_path: Path) -> N
     assert len(codex_search["hits"]) == 1
     assert claude_search["hits"] == []
     assert client.get("/api/snapshot", params={"provider": "other"}).status_code == 422
+
+
+def test_codex_raw_totals_do_not_mutate_the_legacy_claude_counters(tmp_path: Path) -> None:
+    _write_codex(tmp_path / ".codex" / "sessions" / "2026" / "07" / "25" / "rollout.jsonl")
+    _write_claude(tmp_path / ".claude" / "projects" / "claude-project" / "claude.jsonl")
+    conn = connect(tmp_path / "transcripts.db")
+    columns = (
+        "assistant_usage_rows, raw_input_tokens, raw_output_tokens,"
+        " raw_cache_read_tokens, raw_cache_creation_tokens"
+    )
+    try:
+        ingest(conn, TranscriptRoots.for_home(tmp_path))
+        legacy = tuple(conn.execute(f"SELECT {columns} FROM usage_totals WHERE id = 1").fetchone())
+        claude = tuple(
+            conn.execute(
+                f"SELECT {columns} FROM provider_usage_totals WHERE provider = 'claude'"
+            ).fetchone()
+        )
+        codex = tuple(
+            conn.execute(
+                f"SELECT {columns} FROM provider_usage_totals WHERE provider = 'codex'"
+            ).fetchone()
+        )
+    finally:
+        conn.close()
+
+    assert legacy == claude
+    assert codex[0] == 1
+
+
+def test_provider_labels_use_persisted_usage_when_session_metadata_is_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_codex(tmp_path / ".codex" / "sessions" / "2026" / "07" / "25" / "rollout.jsonl")
+    _write_claude(tmp_path / ".claude" / "projects" / "claude-project" / "claude.jsonl")
+    store_db = tmp_path / "transcripts.db"
+    conn = connect(store_db)
+    try:
+        ingest(conn, TranscriptRoots.for_home(tmp_path))
+    finally:
+        conn.close()
+
+    def no_session_meta(_store_db: Path, _session_ids: list[str]) -> dict[str, SessionScan]:
+        return {}
+
+    monkeypatch.setattr(usage_aggregate, "session_meta", no_session_meta)
+
+    both = usage_aggregate.build_snapshot(store_db)
+    codex = usage_aggregate.build_snapshot(store_db, "codex")
+    both_bucket = usage_aggregate.build_bucket(store_db, "daily", "2026-07-25")
+    codex_bucket = usage_aggregate.build_bucket(store_db, "daily", "2026-07-25", "codex")
+
+    assert {row.provider for row in both.recent_sessions} == {"claude", "codex"}
+    assert {row.provider for row in codex.recent_sessions} == {"codex"}
+    assert both_bucket is not None
+    assert {row.provider for row in both_bucket.session_rows} == {"claude", "codex"}
+    assert codex_bucket is not None
+    assert {row.provider for row in codex_bucket.session_rows} == {"codex"}

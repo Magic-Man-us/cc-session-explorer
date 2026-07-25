@@ -19,6 +19,7 @@ from cc_session_explorer.buckets import project_name, session_key
 from cc_session_explorer.ingest import search_readonly
 from cc_session_explorer.ingest.rollup import DIMENSIONS
 from cc_session_explorer.sources import (
+    Provider,
     ProviderScope,
     provider_dimension,
     provider_from_storage_key,
@@ -158,6 +159,33 @@ def _source_name(provider: ProviderScope) -> str:
     return _SOURCE_NAME
 
 
+def _provider_from_persisted_source(source: object, scope: ProviderScope) -> Provider:
+    """Provider stored with a usage row, falling back only for legacy/corrupt rows."""
+    if isinstance(source, str) and source:
+        return provider_from_storage_key(source)
+    return "codex" if scope == "codex" else "claude"
+
+
+def _session_providers(
+    conn: sqlite3.Connection,
+    session_ids: list[str],
+    scope: ProviderScope,
+) -> dict[str, Provider]:
+    """Provider identity for rollup sessions, independent of optional transcript metadata."""
+    if not session_ids:
+        return {}
+    placeholders = ",".join("?" * len(session_ids))
+    rows = conn.execute(
+        "SELECT session_key, MIN(source) AS source FROM usage_events"
+        f" WHERE session_key IN ({placeholders}) GROUP BY session_key",
+        session_ids,
+    ).fetchall()
+    return {
+        str(row["session_key"]): _provider_from_persisted_source(row["source"], scope)
+        for row in rows
+    }
+
+
 def _time_usage(rows: list[sqlite3.Row]) -> list[TimeUsage]:
     return [
         TimeUsage(
@@ -218,11 +246,16 @@ def _recent_sessions(
         f"{_ROLLUP} ORDER BY r.last_seen DESC LIMIT ?",
         (provider_dimension(provider, "session"), _RECENT_SESSIONS_MAX),
     ).fetchall()
-    meta = session_meta(store_db, [str(row["key"]) for row in rows])
+    session_ids = [str(row["key"]) for row in rows]
+    meta = session_meta(store_db, session_ids)
+    providers = _session_providers(conn, session_ids, provider)
     return [
         RecentSession(
             id=str(row["key"]),
-            provider=meta[str(row["key"])].provider if str(row["key"]) in meta else "claude",
+            provider=providers.get(
+                str(row["key"]),
+                "codex" if provider == "codex" else "claude",
+            ),
             started_at=_iso(row["first_seen"]),
             last_seen_at=_iso(row["last_seen"]),
             first_prompt=meta[str(row["key"])].first_prompt if str(row["key"]) in meta else None,
@@ -408,7 +441,7 @@ def build_bucket(
         # (grain x bucket x session), and it is only ever asked for one bucket, off an index.
         source_filter = provider_source_predicate(provider)
         rows = conn.execute(
-            "SELECT session_key, model,"
+            "SELECT session_key, model, MIN(source) AS source,"
             " COALESCE(SUM(input_tokens), 0) AS input_tokens,"
             " COALESCE(SUM(output_tokens), 0) AS output_tokens,"
             " COALESCE(SUM(cache_read_input_tokens), 0) AS cache_read_tokens,"
@@ -434,9 +467,7 @@ def build_bucket(
         session_rows=[
             BucketSessionUsage(
                 session_id=str(row["session_key"]),
-                provider=meta[str(row["session_key"])].provider
-                if str(row["session_key"]) in meta
-                else "claude",
+                provider=_provider_from_persisted_source(row["source"], provider),
                 project=meta[str(row["session_key"])].project
                 if str(row["session_key"]) in meta
                 else None,
