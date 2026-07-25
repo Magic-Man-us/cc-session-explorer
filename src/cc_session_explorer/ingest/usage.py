@@ -234,24 +234,28 @@ def _accumulate_raw(
 ) -> None:
     if not raw.rows:
         return
-    conn.execute(
-        "INSERT INTO usage_totals (id, assistant_usage_rows, raw_input_tokens, raw_output_tokens,"
-        " raw_cache_read_tokens, raw_cache_creation_tokens) VALUES (1, ?, ?, ?, ?, ?)"
-        " ON CONFLICT(id) DO UPDATE SET"
-        " assistant_usage_rows = assistant_usage_rows + excluded.assistant_usage_rows,"
-        " raw_input_tokens = raw_input_tokens + excluded.raw_input_tokens,"
-        " raw_output_tokens = raw_output_tokens + excluded.raw_output_tokens,"
-        " raw_cache_read_tokens = raw_cache_read_tokens + excluded.raw_cache_read_tokens,"
-        " raw_cache_creation_tokens ="
-        " raw_cache_creation_tokens + excluded.raw_cache_creation_tokens",
-        (
-            raw.rows,
-            raw.input_tokens,
-            raw.output_tokens,
-            raw.cache_read_tokens,
-            raw.cache_creation_tokens,
-        ),
-    )
+    if provider == "claude":
+        # Preserve the pre-provider table as a Claude-only migration source. Read-facing code
+        # uses provider_usage_totals, so Codex must never leak into this legacy row.
+        conn.execute(
+            "INSERT INTO usage_totals"
+            " (id, assistant_usage_rows, raw_input_tokens, raw_output_tokens,"
+            " raw_cache_read_tokens, raw_cache_creation_tokens) VALUES (1, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(id) DO UPDATE SET"
+            " assistant_usage_rows = assistant_usage_rows + excluded.assistant_usage_rows,"
+            " raw_input_tokens = raw_input_tokens + excluded.raw_input_tokens,"
+            " raw_output_tokens = raw_output_tokens + excluded.raw_output_tokens,"
+            " raw_cache_read_tokens = raw_cache_read_tokens + excluded.raw_cache_read_tokens,"
+            " raw_cache_creation_tokens ="
+            " raw_cache_creation_tokens + excluded.raw_cache_creation_tokens",
+            (
+                raw.rows,
+                raw.input_tokens,
+                raw.output_tokens,
+                raw.cache_read_tokens,
+                raw.cache_creation_tokens,
+            ),
+        )
     conn.execute(
         "INSERT INTO provider_usage_totals"
         " (provider, assistant_usage_rows, raw_input_tokens, raw_output_tokens,"
