@@ -6,6 +6,7 @@ from cc_session_core import Session, build_investigation, render_investigation_m
 from fastapi import APIRouter, HTTPException, Path, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
+from cc_session_explorer.sources import ProviderScope
 from cc_session_explorer.viz import SessionPage, build_page, build_page_model
 
 from ..export_timeline import load_export_timeline
@@ -37,42 +38,60 @@ from .deps import ExportPathDep, TranscriptRootsDep, TranscriptsDbDep
 WindowParam = Annotated[int | None, Query(ge=1, description="Context window to render against.")]
 # Event-index path param: the zero-based position of an event in a session's arrival-ordered chain.
 EventIndexParam = Annotated[int, Path(ge=0, description="Zero-based event position in the chain.")]
+ProviderParam = Annotated[
+    ProviderScope,
+    Query(description="Provider scope: all, claude, or codex."),
+]
 
 
 router = APIRouter()
 
 
 @router.get("/timeline/sessions")
-def list_sessions(transcript_roots: TranscriptRootsDep) -> list[SessionRef]:
+def list_sessions(
+    transcript_roots: TranscriptRootsDep,
+    provider: ProviderParam = "all",
+) -> list[SessionRef]:
     """The recorded sessions the context explorer can replay, newest first."""
-    return discover_sessions(transcript_roots)
+    return discover_sessions(transcript_roots.scoped(provider))
 
 
 @router.get("/timeline/session/{session_id}")
 def session_context_timeline(
-    session_id: str, transcript_roots: TranscriptRootsDep, window_tokens: WindowParam = None
+    session_id: str,
+    transcript_roots: TranscriptRootsDep,
+    window_tokens: WindowParam = None,
+    provider: ProviderParam = "all",
 ) -> ContextTimeline:
     """Replay one recorded session as a context timeline; 404 when the id has no transcript."""
-    path = resolve_session(transcript_roots, session_id)
+    path = resolve_session(transcript_roots.scoped(provider), session_id)
     if path is None:
         raise HTTPException(status_code=404, detail="session not found")
     return from_transcript(path, window_tokens)
 
 
 @router.get("/timeline/session/{session_id}/sankey", response_class=HTMLResponse)
-def session_sankey(session_id: str, transcript_roots: TranscriptRootsDep) -> HTMLResponse:
+def session_sankey(
+    session_id: str,
+    transcript_roots: TranscriptRootsDep,
+    provider: ProviderParam = "all",
+) -> HTMLResponse:
     """Render one session as a self-contained Sankey token/cost-flow page (via cc_session_explorer.viz)."""
-    path = resolve_session(transcript_roots, session_id)
+    path = resolve_session(transcript_roots.scoped(provider), session_id)
     if path is None:
         raise HTTPException(status_code=404, detail="session not found")
     return HTMLResponse(build_page(Session.load(path)))
 
 
 @router.get("/timeline/session/{session_id}/sankey-data")
-def session_sankey_data(session_id: str, transcript_roots: TranscriptRootsDep) -> SessionPage:
+def session_sankey_data(
+    session_id: str,
+    transcript_roots: TranscriptRootsDep,
+    provider: ProviderParam = "all",
+) -> SessionPage:
     """The Sankey page's stats + flow graphs as typed data, for an inline SPA embed
     (the SPA renders its own SVG rather than iframing the standalone HTML page)."""
-    path = resolve_session(transcript_roots, session_id)
+    path = resolve_session(transcript_roots.scoped(provider), session_id)
     if path is None:
         raise HTTPException(status_code=404, detail="session not found")
     return build_page_model(Session.load(path))
@@ -83,11 +102,12 @@ def session_investigation(
     session_id: str,
     transcript_roots: TranscriptRootsDep,
     fmt: Literal["markdown", "json"] = "markdown",
+    provider: ProviderParam = "all",
 ) -> PlainTextResponse:
     """The full investigation record for one session: every tool call with its stated
     reason, arguments, result, error, and timing, a per-tool pathway summary, and the
     complete narrative timeline; 404 when the id has no transcript."""
-    path = resolve_session(transcript_roots, session_id)
+    path = resolve_session(transcript_roots.scoped(provider), session_id)
     if path is None:
         raise HTTPException(status_code=404, detail="session not found")
     report = build_investigation(Session.load(path))
@@ -97,10 +117,14 @@ def session_investigation(
 
 
 @router.get("/timeline/session/{session_id}/grouped")
-def session_grouped(session_id: str, transcript_roots: TranscriptRootsDep) -> list[EventGroup]:
+def session_grouped(
+    session_id: str,
+    transcript_roots: TranscriptRootsDep,
+    provider: ProviderParam = "all",
+) -> list[EventGroup]:
     """The grouped, expandable full chain of one session — events collapsed into categories,
     each carrying its members; 404 when the id has no transcript."""
-    path = resolve_session(transcript_roots, session_id)
+    path = resolve_session(transcript_roots.scoped(provider), session_id)
     if path is None:
         raise HTTPException(status_code=404, detail="session not found")
     return group_events(from_transcript(path).events)
@@ -108,11 +132,14 @@ def session_grouped(session_id: str, transcript_roots: TranscriptRootsDep) -> li
 
 @router.get("/timeline/session/{session_id}/event/{index}")
 def session_event(
-    session_id: str, index: EventIndexParam, transcript_roots: TranscriptRootsDep
+    session_id: str,
+    index: EventIndexParam,
+    transcript_roots: TranscriptRootsDep,
+    provider: ProviderParam = "all",
 ) -> EventInspection:
     """One event of a recorded session paired with the raw text it was derived from; 404 when the
     id has no transcript or the index is past the end of the chain."""
-    path = resolve_session(transcript_roots, session_id)
+    path = resolve_session(transcript_roots.scoped(provider), session_id)
     if path is None:
         raise HTTPException(status_code=404, detail="session not found")
     inspection = inspect_event(path, index)
@@ -122,9 +149,12 @@ def session_event(
 
 
 @router.get("/timeline/projects")
-def list_projects(transcript_roots: TranscriptRootsDep) -> list[ProjectRef]:
+def list_projects(
+    transcript_roots: TranscriptRootsDep,
+    provider: ProviderParam = "all",
+) -> list[ProjectRef]:
     """The recorded projects the explorer can break down, largest first."""
-    return discover_projects(transcript_roots)
+    return discover_projects(transcript_roots.scoped(provider))
 
 
 @router.get("/timeline/ledger")
@@ -133,9 +163,10 @@ def timeline_ledger(
     period: Annotated[LedgerPeriod, Query(description="Ledger grouping period.")] = (
         LedgerPeriod.daily
     ),
+    provider: ProviderParam = "all",
 ) -> LedgerView:
-    """Daily or weekly Claude Code context-token ledger across local session transcripts."""
-    return build_ledger(transcripts_db, period)
+    """Daily or weekly provider-scoped context-token ledger across local transcripts."""
+    return build_ledger(transcripts_db, period, provider)
 
 
 @router.get("/timeline/export")
@@ -153,11 +184,12 @@ def project_breakdown(
     transcript_roots: TranscriptRootsDep,
     window_tokens: WindowParam = None,
     limit: Annotated[int | None, Query(ge=1)] = None,
+    provider: ProviderParam = "all",
 ) -> ProjectBreakdown:
     """Break a whole project fully down — per-kind overview + per-session summaries; 404 when the
     project doesn't exist. `limit` caps how many of the largest sessions are read (the adapter's
     default when omitted)."""
-    project_dir = resolve_project(transcript_roots, project)
+    project_dir = resolve_project(transcript_roots.scoped(provider), project)
     if project_dir is None:
         raise HTTPException(status_code=404, detail="project not found")
     if limit is None:

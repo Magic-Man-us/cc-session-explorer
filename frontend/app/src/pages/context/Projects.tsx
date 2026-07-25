@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { EmptyState, FilterableTable, LoadingState, type Column, type ExportColumn } from "@cc-session/dashboard-ui";
 import { fetchContextProjects, type ProjectRef } from "../../api";
 import { toContextProject, useNavigate } from "../../nav";
+import { useProviderScope } from "../../provider";
 import { fmtBytes } from "./shared";
 
 const PROJECTS_PAGE_SIZE = 10;
@@ -17,8 +18,14 @@ const projectExportColumns: ExportColumn<ProjectRef>[] = [
  *  `/context/projects/:project` (`ContextProjectDetail`) — never expands in place. */
 export function ContextProjects() {
   const navigate = useNavigate();
+  const provider = useProviderScope();
   const [page, setPage] = useState(0);
-  const { data: projects, isPending, isError, error } = useQuery({ queryKey: ["context", "projects"], queryFn: fetchContextProjects });
+  const { data: projects, isPending, isError, error } = useQuery({
+    queryKey: ["context", "projects", provider],
+    queryFn: () => fetchContextProjects(provider),
+  });
+
+  useEffect(() => setPage(0), [provider]);
 
   if (isError) return <EmptyState>{error.message}</EmptyState>;
   if (isPending) return <LoadingState>Loading projects…</LoadingState>;

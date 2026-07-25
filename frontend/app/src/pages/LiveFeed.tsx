@@ -8,6 +8,7 @@ import {
   type LogBlock,
   type LogRecord,
 } from "../api";
+import { useProviderScope } from "../provider";
 
 const LIST_POLL_MS = 5000;
 const FOLLOW_POLL_MS = 3000;
@@ -245,6 +246,7 @@ function FeedRow({
 
 /** Tails one session's transcript file as a chat-style message feed, newest first. */
 function LogFollow({ session, info }: { session: string; info?: LiveSession }) {
+  const scope = useProviderScope();
   const [records, setRecords] = useState<LogRecord[]>([]);
   const [file, setFile] = useState("");
   const [skipped, setSkipped] = useState(0);
@@ -267,7 +269,7 @@ function LogFollow({ session, info }: { session: string; info?: LiveSession }) {
     cursorRef.current = { offset: 0, line: 0 };
 
     const poll = (initial: boolean) =>
-      fetchSessionLog(session, cursorRef.current.offset, cursorRef.current.line)
+      fetchSessionLog(session, cursorRef.current.offset, cursorRef.current.line, scope)
         .then((log) => {
           if (!live) return;
           cursorRef.current = { offset: log.offset, line: log.line };
@@ -291,7 +293,7 @@ function LogFollow({ session, info }: { session: string; info?: LiveSession }) {
       live = false;
       clearInterval(timer);
     };
-  }, [session]);
+  }, [session, scope]);
 
   const links = useMemo(() => buildToolLinks(records), [records]);
   const feed = useMemo(() => buildFeed(records, links), [records, links]);
@@ -367,14 +369,16 @@ function LogFollow({ session, info }: { session: string; info?: LiveSession }) {
 }
 
 export function LiveFeed() {
+  const provider = useProviderScope();
   const [selected, setSelected] = useState("");
   const [manual, setManual] = useState("");
   const { data, isPending, isError, error } = useQuery({
-    queryKey: ["live", "sessions"],
-    queryFn: () => fetchLiveSessions(WINDOW_MIN),
+    queryKey: ["live", "sessions", provider],
+    queryFn: () => fetchLiveSessions(WINDOW_MIN, provider),
     refetchInterval: LIST_POLL_MS,
   });
   const sessions: LiveSession[] = data?.sessions ?? [];
+  useEffect(() => setSelected(""), [provider]);
   const status = isPending
     ? "Waiting"
     : isError

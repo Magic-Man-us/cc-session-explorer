@@ -23,9 +23,11 @@ from cc_session_explorer.ingest.types import FileCount, RecordCount, SessionId
 from cc_session_explorer.paths import resolve_session_path
 from cc_session_explorer.sources import (
     Provider,
+    ProviderScope,
     TranscriptLocation,
     project_from_storage_key,
     provider_from_storage_key,
+    provider_source_predicate,
 )
 from cc_session_explorer.types import TokenCount
 
@@ -154,29 +156,41 @@ def session_meta(store_db: Path, keys: list[str]) -> dict[str, SessionScan]:
 _SCAN_CACHE: dict[str, tuple[tuple[int, int], ScanResult]] = {}
 
 
-def scan_store(db_path: Path) -> ScanResult:
+def scan_store(db_path: Path, provider: ProviderScope = "all") -> ScanResult:
     """The lens's whole dataset, read back from the store in a handful of aggregate queries."""
     if not db_path.exists():
         return _EMPTY
     stat = db_path.stat()
     fingerprint = (stat.st_mtime_ns, stat.st_size)
-    cached = _SCAN_CACHE.get(str(db_path))
+    cache_key = f"{db_path}:{provider}"
+    cached = _SCAN_CACHE.get(cache_key)
     if cached is not None and cached[0] == fingerprint:
         return cached[1]
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
-        records = conn.execute("SELECT COUNT(*) FROM records").fetchone()[0]
-        files = conn.execute("SELECT COUNT(*) FROM ingest_state").fetchone()[0]
+        source_filter = provider_source_predicate(provider)
+        records = conn.execute(f"SELECT COUNT(*) FROM records WHERE {source_filter}").fetchone()[0]
+        files = conn.execute(f"SELECT COUNT(*) FROM ingest_state WHERE {source_filter}").fetchone()[
+            0
+        ]
         assistant_records = conn.execute(
-            "SELECT COUNT(*) FROM records WHERE type = 'assistant'"
+            f"SELECT COUNT(*) FROM records WHERE type = 'assistant' AND {source_filter}"
         ).fetchone()[0]
+        raw_where = "1 = 1" if provider == "all" else "provider = ?"
+        raw_params = () if provider == "all" else (provider,)
         raw = conn.execute(
-            "SELECT assistant_usage_rows, raw_input_tokens, raw_output_tokens,"
-            " raw_cache_read_tokens, raw_cache_creation_tokens FROM usage_totals WHERE id = 1"
+            "SELECT COALESCE(SUM(assistant_usage_rows), 0) AS assistant_usage_rows,"
+            " COALESCE(SUM(raw_input_tokens), 0) AS raw_input_tokens,"
+            " COALESCE(SUM(raw_output_tokens), 0) AS raw_output_tokens,"
+            " COALESCE(SUM(raw_cache_read_tokens), 0) AS raw_cache_read_tokens,"
+            " COALESCE(SUM(raw_cache_creation_tokens), 0) AS raw_cache_creation_tokens"
+            f" FROM provider_usage_totals WHERE {raw_where}",
+            raw_params,
         ).fetchone()
         priced = conn.execute(
             "SELECT COUNT(*) FROM usage_events WHERE source_kind = 'raw_transcript'"
+            f" AND {source_filter}"
         ).fetchone()[0]
     except sqlite3.DatabaseError:
         logger.warning("could not read %s; serving an empty usage view", db_path)
@@ -199,7 +213,7 @@ def scan_store(db_path: Path) -> ScanResult:
         raw_cache_read_tokens=int(raw["raw_cache_read_tokens"]) if raw is not None else 0,
         raw_cache_creation_tokens=int(raw["raw_cache_creation_tokens"]) if raw is not None else 0,
     )
-    _SCAN_CACHE[str(db_path)] = (fingerprint, result)
+    _SCAN_CACHE[cache_key] = (fingerprint, result)
     return result
 
 

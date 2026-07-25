@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { EmptyState, FilterableTable, LoadingState, type Column } from "@cc-session/dashboard-ui";
 import { fetchContextSessions, type SessionRef } from "../../api";
 import { toContextSession, useNavigate } from "../../nav";
+import { useProviderScope } from "../../provider";
 import { fmtBytes, fmtWhen, matchesSession, sessionExportColumns } from "./shared";
 
 const SESSIONS_PAGE_SIZE = 10;
@@ -11,10 +12,16 @@ const SESSIONS_PAGE_SIZE = 10;
  *  `/context/sessions/:id` (`ContextSessionDetail`) — never expands in place. */
 export function ContextSessions() {
   const navigate = useNavigate();
+  const provider = useProviderScope();
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
 
-  const { data: sessions, isPending, isError, error } = useQuery({ queryKey: ["context", "sessions"], queryFn: fetchContextSessions });
+  const { data: sessions, isPending, isError, error } = useQuery({
+    queryKey: ["context", "sessions", provider],
+    queryFn: () => fetchContextSessions(provider),
+  });
+
+  useEffect(() => setPage(0), [provider]);
 
   if (isError) return <EmptyState>{error.message}</EmptyState>;
   if (isPending) return <LoadingState>Loading sessions…</LoadingState>;
@@ -41,7 +48,7 @@ export function ContextSessions() {
       onRowClick={(r) => navigate(toContextSession(r.session_id))}
       query={query}
       onQueryChange={setQuery}
-      filterPlaceholder="Filter by session id or project"
+      filterPlaceholder="Filter by provider, session id, or project"
       matches={matchesSession}
       exportColumns={sessionExportColumns}
       filename="context-sessions"

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from cc_session_explorer.buckets import bucket_key, bucket_span
 from cc_session_explorer.ingest.db import connect
 from cc_session_explorer.ingest.ingest import ingest
+from cc_session_explorer.ingest.rollup import derive_rollups
 from cc_session_explorer.usage.aggregate import (
     build_bucket,
     build_live_feed,
@@ -172,15 +173,16 @@ def test_rollups_agree_with_a_direct_aggregate(tmp_path: Path) -> None:
                     f" COUNT(*) FROM usage_events GROUP BY {column}"
                 ).fetchall()
             }
-            stored = {
-                (str(row[0]), int(row[1]), round(float(row[2]), 6), int(row[3]))
-                for row in conn.execute(
-                    "SELECT key, input_tokens + output_tokens, cost_usd, turns"
-                    " FROM usage_rollup WHERE dimension = ?",
-                    (dimension,),
-                ).fetchall()
-            }
-            assert stored == truth, f"the {dimension} rollup drifted from its own sum"
+            for stored_dimension in (dimension, f"claude:{dimension}"):
+                stored = {
+                    (str(row[0]), int(row[1]), round(float(row[2]), 6), int(row[3]))
+                    for row in conn.execute(
+                        "SELECT key, input_tokens + output_tokens, cost_usd, turns"
+                        " FROM usage_rollup WHERE dimension = ?",
+                        (stored_dimension,),
+                    ).fetchall()
+                }
+                assert stored == truth, f"the {stored_dimension} rollup drifted from its own sum"
 
         # distinct sessions, the one total a counter cannot carry
         for dimension, column in (("total", "''"), ("model", "model"), ("day", "day")):
@@ -191,15 +193,40 @@ def test_rollups_agree_with_a_direct_aggregate(tmp_path: Path) -> None:
                     f" FROM usage_events GROUP BY {column}"
                 ).fetchall()
             }
-            stored = {
-                (str(row[0]), int(row[1]))
-                for row in conn.execute(
-                    "SELECT key, COUNT(*) FROM usage_rollup_sessions WHERE dimension = ?"
-                    " GROUP BY key",
-                    (dimension,),
-                ).fetchall()
-            }
-            assert stored == truth, f"the {dimension} session count drifted"
+            for stored_dimension in (dimension, f"claude:{dimension}"):
+                stored = {
+                    (str(row[0]), int(row[1]))
+                    for row in conn.execute(
+                        "SELECT key, COUNT(*) FROM usage_rollup_sessions WHERE dimension = ?"
+                        " GROUP BY key",
+                        (stored_dimension,),
+                    ).fetchall()
+                }
+                assert stored == truth, f"the {stored_dimension} session count drifted"
+    finally:
+        conn.close()
+
+
+def test_pre_provider_rollups_are_rebuilt_once(tmp_path: Path) -> None:
+    projects = tmp_path / "projects" / "-proj"
+    _write(
+        projects / "one.jsonl",
+        [_assistant_payload(uuid="u-1", request_id="r1", message_id="m1")],
+    )
+    conn = connect(tmp_path / "transcripts.db")
+    try:
+        ingest(conn, tmp_path / "projects")
+        conn.execute("DELETE FROM usage_rollup WHERE dimension LIKE '%:%'")
+        conn.execute("DELETE FROM usage_rollup_sessions WHERE dimension LIKE '%:%'")
+        conn.commit()
+
+        assert derive_rollups(conn) == 1
+        assert (
+            conn.execute(
+                "SELECT turns FROM usage_rollup WHERE dimension = 'claude:total' AND key = ''"
+            ).fetchone()[0]
+            == 1
+        )
     finally:
         conn.close()
 

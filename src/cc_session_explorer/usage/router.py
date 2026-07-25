@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from cc_session_explorer.api.deps import TranscriptRootsDep, TranscriptsDbDep
 from cc_session_explorer.buckets import Grain
+from cc_session_explorer.sources import ProviderScope
 from cc_session_explorer.usage.aggregate import (
     build_bucket,
     build_live_feed,
@@ -36,27 +37,40 @@ from cc_session_explorer.usage.transcript import (
 )
 
 router = APIRouter()
+ProviderParam = Annotated[
+    ProviderScope,
+    Query(description="Provider scope: all, claude, or codex."),
+]
 
 
 @router.get("/snapshot")
-def snapshot(store_db: TranscriptsDbDep) -> DashboardSnapshot:
+def snapshot(
+    store_db: TranscriptsDbDep,
+    provider: ProviderParam = "all",
+) -> DashboardSnapshot:
     """Totals, rollups, and time buckets — the payload behind most dashboard views."""
-    return build_snapshot(store_db)
+    return build_snapshot(store_db, provider)
 
 
 @router.get("/tail")
 def tail(
     store_db: TranscriptsDbDep,
     limit: Annotated[int, Query(ge=1, le=500)] = 80,
+    provider: ProviderParam = "all",
 ) -> UsageTail:
     """The most recent usage turns, newest first."""
-    return build_tail(store_db, limit)
+    return build_tail(store_db, limit, provider)
 
 
 @router.get("/bucket")
-def bucket(store_db: TranscriptsDbDep, grain: Grain, bucket: str) -> BucketDetail:
+def bucket(
+    store_db: TranscriptsDbDep,
+    grain: Grain,
+    bucket: str,
+    provider: ProviderParam = "all",
+) -> BucketDetail:
     """One time bucket expanded into per-session rows."""
-    detail = build_bucket(store_db, grain, bucket)
+    detail = build_bucket(store_db, grain, bucket, provider)
     if detail is None:
         raise HTTPException(status_code=404, detail="bucket not found")
     return detail
@@ -64,10 +78,14 @@ def bucket(store_db: TranscriptsDbDep, grain: Grain, bucket: str) -> BucketDetai
 
 @router.get("/session-timeline")
 def session_timeline(
-    transcript_roots: TranscriptRootsDep, session: str, grain: Grain, bucket: str
+    transcript_roots: TranscriptRootsDep,
+    session: str,
+    grain: Grain,
+    bucket: str,
+    provider: ProviderParam = "all",
 ) -> SessionTimeline:
     """One session's transcript events inside one time bucket."""
-    timeline = build_session_timeline(transcript_roots, session, grain, bucket)
+    timeline = build_session_timeline(transcript_roots.scoped(provider), session, grain, bucket)
     if timeline is None:
         raise HTTPException(status_code=404, detail="session not found")
     return timeline
@@ -78,22 +96,24 @@ def live_feed(
     store_db: TranscriptsDbDep,
     after: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    provider: ProviderParam = "all",
 ) -> LiveFeed:
     """Every record ingested after the ``after`` cursor, newest first, filed to its session.
 
     The unified feed across all sessions; poll with the returned ``cursor`` to follow live. Drill
     into one session's full detail via ``/session-log``.
     """
-    return build_live_feed(store_db, after, limit)
+    return build_live_feed(store_db, after, limit, provider)
 
 
 @router.get("/live-sessions")
 def live_sessions(
     store_db: TranscriptsDbDep,
     window: Annotated[int, Query(ge=1, le=24 * 60)] = 30,
+    provider: ProviderParam = "all",
 ) -> LiveSessions:
     """Sessions with activity inside the trailing window, most recent first."""
-    return build_live_sessions(store_db, window)
+    return build_live_sessions(store_db, window, provider)
 
 
 @router.get("/session-transcript")
@@ -101,9 +121,10 @@ def session_transcript(
     transcript_roots: TranscriptRootsDep,
     session: str,
     after: Annotated[int | None, Query(ge=0)] = None,
+    provider: ProviderParam = "all",
 ) -> SessionTranscript:
     """The session's events past cursor ``after`` — the SPA polls this to follow live turns."""
-    transcript = build_transcript(transcript_roots, session, after)
+    transcript = build_transcript(transcript_roots.scoped(provider), session, after)
     if transcript is None:
         raise HTTPException(status_code=404, detail="session not found")
     return transcript
@@ -115,9 +136,10 @@ def session_log(
     session: str,
     offset: Annotated[int, Query(ge=0)] = 0,
     line: Annotated[int, Query(ge=0)] = 0,
+    provider: ProviderParam = "all",
 ) -> SessionLog:
     """Every record appended past the cursor, full detail — the live-log view tails this."""
-    log = build_session_log(transcript_roots, session, offset, line)
+    log = build_session_log(transcript_roots.scoped(provider), session, offset, line)
     if log is None:
         raise HTTPException(status_code=404, detail="session not found")
     return log
@@ -128,10 +150,11 @@ def search(
     transcripts_db: TranscriptsDbDep,
     q: Annotated[str, Query(min_length=1)],
     limit: Annotated[int, Query(ge=1, le=200)] = 20,
+    provider: ProviderParam = "all",
 ) -> SearchResults:
     """Full-text search over the local transcript archive; empty when the archive doesn't
     exist yet (the watcher hasn't ingested anything) or ``q`` isn't a valid FTS5 query."""
-    return build_search(transcripts_db, q, limit)
+    return build_search(transcripts_db, q, limit, provider)
 
 
 @router.get("/block")
@@ -140,9 +163,10 @@ def block(
     session: str,
     record: Annotated[int, Query(ge=0)],
     index: Annotated[int, Query(ge=0)],
+    provider: ProviderParam = "all",
 ) -> BlockContent:
     """The full, unclipped text of one timeline part."""
-    content = build_block(transcript_roots, session, record, index)
+    content = build_block(transcript_roots.scoped(provider), session, record, index)
     if content is None:
         raise HTTPException(status_code=404, detail="block not found")
     return content

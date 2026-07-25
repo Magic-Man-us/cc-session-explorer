@@ -19,6 +19,7 @@ from cc_session_core.types import FilePath
 from cc_session_explorer.base import InputModel
 from cc_session_explorer.ingest.types import LineNumber, SessionId
 from cc_session_explorer.paths import DATA_HOME, TRANSCRIPTS_DB_NAME
+from cc_session_explorer.sources import ProviderScope, provider_source_predicate
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -51,6 +52,7 @@ CREATE TABLE IF NOT EXISTS records (
 );
 
 CREATE INDEX IF NOT EXISTS idx_records_uuid ON records (uuid);
+CREATE INDEX IF NOT EXISTS idx_records_source ON records (source);
 CREATE INDEX IF NOT EXISTS idx_records_session ON records (session_id);
 CREATE INDEX IF NOT EXISTS idx_records_type ON records (type);
 CREATE INDEX IF NOT EXISTS idx_records_timestamp ON records (timestamp);
@@ -154,6 +156,36 @@ CREATE TABLE IF NOT EXISTS usage_totals (
     raw_cache_creation_tokens INTEGER NOT NULL DEFAULT 0
 );
 
+-- The same raw counters split by provider. The legacy single-row table remains for migration
+-- compatibility; read-facing code uses this table so Claude, Codex, and combined views agree.
+CREATE TABLE IF NOT EXISTS provider_usage_totals (
+    provider                  TEXT PRIMARY KEY,
+    assistant_usage_rows      INTEGER NOT NULL DEFAULT 0,
+    raw_input_tokens          INTEGER NOT NULL DEFAULT 0,
+    raw_output_tokens         INTEGER NOT NULL DEFAULT 0,
+    raw_cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+    raw_cache_creation_tokens INTEGER NOT NULL DEFAULT 0
+);
+
+-- Existing databases only contain Claude raw counters in usage_totals. Seed that provider once,
+-- then reconstruct historical Codex counters from its already-deduplicated normalized requests.
+INSERT OR IGNORE INTO provider_usage_totals
+    (provider, assistant_usage_rows, raw_input_tokens, raw_output_tokens,
+     raw_cache_read_tokens, raw_cache_creation_tokens)
+SELECT 'claude', assistant_usage_rows, raw_input_tokens, raw_output_tokens,
+       raw_cache_read_tokens, raw_cache_creation_tokens
+FROM usage_totals WHERE id = 1;
+
+INSERT OR IGNORE INTO provider_usage_totals
+    (provider, assistant_usage_rows, raw_input_tokens, raw_output_tokens,
+     raw_cache_read_tokens, raw_cache_creation_tokens)
+SELECT 'codex', COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
+       COALESCE(SUM(cache_read_input_tokens), 0),
+       COALESCE(SUM(cache_creation_5m_input_tokens + cache_creation_1h_input_tokens
+                    + cache_creation_unknown_tokens), 0)
+FROM usage_events WHERE source LIKE 'codex/%'
+HAVING COUNT(*) > 0;
+
 -- Maintained rollups of usage_events: a view reads its totals instead of summing 200k rows.
 -- See `cc_session_explorer.ingest.rollup` for why membership needs its own table.
 CREATE TABLE IF NOT EXISTS usage_rollup (
@@ -187,6 +219,7 @@ CREATE INDEX IF NOT EXISTS idx_rollup_last_seen ON usage_rollup (dimension, last
 CREATE INDEX IF NOT EXISTS idx_rollup_cost ON usage_rollup (dimension, cost_usd DESC);
 
 CREATE INDEX IF NOT EXISTS idx_usage_day ON usage_events (day);
+CREATE INDEX IF NOT EXISTS idx_usage_source ON usage_events (source);
 CREATE INDEX IF NOT EXISTS idx_usage_session_key ON usage_events (session_key);
 CREATE INDEX IF NOT EXISTS idx_usage_project_name ON usage_events (project_name);
 CREATE INDEX IF NOT EXISTS idx_usage_week ON usage_events (week_bucket);
@@ -261,24 +294,32 @@ def count_records(conn: sqlite3.Connection) -> int:
 
 
 def search(
-    conn: sqlite3.Connection, query: str, limit: int = _DEFAULT_SEARCH_LIMIT
+    conn: sqlite3.Connection,
+    query: str,
+    limit: int = _DEFAULT_SEARCH_LIMIT,
+    provider: ProviderScope = "all",
 ) -> list[SearchHit]:
     """Full-text search over record prose, best matches first, with a highlighted snippet.
 
     ``query`` is an FTS5 MATCH expression; results are ranked by relevance (``bm25``).
     """
+    source_filter = provider_source_predicate(provider, "r.source")
     rows = conn.execute(
         "SELECT r.source, r.line_no, r.type, r.session_id, r.timestamp,"
         " snippet(records_fts, 0, '[', ']', '…', 12) AS snippet"
         " FROM records_fts JOIN records r ON r.id = records_fts.rowid"
-        " WHERE records_fts MATCH ? ORDER BY rank LIMIT ?",
+        f" WHERE records_fts MATCH ? AND {source_filter}"
+        " ORDER BY rank LIMIT ?",
         (query, limit),
     ).fetchall()
     return [SearchHit.model_validate(dict(row)) for row in rows]
 
 
 def search_readonly(
-    db_path: Path, query: str, limit: int = _DEFAULT_SEARCH_LIMIT
+    db_path: Path,
+    query: str,
+    limit: int = _DEFAULT_SEARCH_LIMIT,
+    provider: ProviderScope = "all",
 ) -> list[SearchHit]:
     """:func:`search`, but for read-facing callers (the API, the MCP server): opens the
     store read-only so a request can never create or write ``transcripts.db``, and degrades
@@ -290,7 +331,7 @@ def search_readonly(
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
-        return search(conn, query, limit)
+        return search(conn, query, limit, provider)
     except sqlite3.DatabaseError:
         logger.warning("could not search %s (locked, corrupt, or a malformed query)", db_path)
         return []

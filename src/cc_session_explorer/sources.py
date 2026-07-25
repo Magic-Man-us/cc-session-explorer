@@ -17,6 +17,7 @@ from cc_session_core import (
 from cc_session_core.codex.models import SessionMetaRecord
 
 Provider = Literal["claude", "codex"]
+ProviderScope = Literal["all", "claude", "codex"]
 
 
 @dataclass(frozen=True)
@@ -89,6 +90,14 @@ class TranscriptRoots:
         """Directories that can be passed to a filesystem watcher."""
         return tuple(source.root for source in self.sources if source.root.is_dir())
 
+    def scoped(self, provider: ProviderScope) -> TranscriptRoots:
+        """The roots visible under one provider selection."""
+        if provider == "all":
+            return self
+        return TranscriptRoots(
+            tuple(source for source in self.sources if source.provider == provider)
+        )
+
     def source_for(self, path: Path) -> TranscriptSource | None:
         """The configured root containing ``path``."""
         resolved = path.resolve()
@@ -149,6 +158,24 @@ def source_from_environment() -> TranscriptRoots:
 def provider_from_storage_key(source: str | None) -> Provider:
     """Provider encoded in a new archive source key; legacy keys are Claude."""
     return "codex" if source and source.startswith("codex/") else "claude"
+
+
+def provider_dimension(provider: ProviderScope, dimension: str) -> str:
+    """Stored rollup dimension for an all-provider or provider-specific view."""
+    return dimension if provider == "all" else f"{provider}:{dimension}"
+
+
+def provider_source_predicate(provider: ProviderScope, column: str = "source") -> str:
+    """SQLite predicate selecting storage keys owned by ``provider``.
+
+    Legacy and imported rows predate provider-prefixed storage keys and are Claude data.
+    ``column`` is always an internal, hard-coded identifier supplied by repository code.
+    """
+    if provider == "all":
+        return "1 = 1"
+    if provider == "codex":
+        return f"{column} LIKE 'codex/%'"
+    return f"({column} IS NULL OR {column} NOT LIKE 'codex/%')"
 
 
 def project_from_storage_key(source: str | None) -> str | None:

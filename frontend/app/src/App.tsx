@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { Breadcrumbs, Button, EmptyState, LoadingState, Root, Sidebar, type Crumb } from "@cc-session/dashboard-ui";
+import {
+  Breadcrumbs,
+  Button,
+  EmptyState,
+  LoadingState,
+  Root,
+  SegmentedControl,
+  Sidebar,
+  type Crumb,
+} from "@cc-session/dashboard-ui";
 
 import { fetchSnapshot } from "./api";
 import { NavProvider, type NavRequest } from "./nav";
@@ -28,6 +37,13 @@ import { ContextSessionDetail } from "./pages/context/SessionDetail";
 import { ContextProjects } from "./pages/context/Projects";
 import { ContextProjectDetail } from "./pages/context/ProjectDetail";
 import { ContextLedger } from "./pages/context/Ledger";
+import {
+  initialProviderScope,
+  PROVIDER_OPTIONS,
+  providerLabel,
+  ProviderScopeProvider,
+  rememberProviderScope,
+} from "./provider";
 
 function pageTitle(page: Page): string {
   switch (page.kind) {
@@ -115,16 +131,23 @@ export function App() {
   const [sessionsQuery, setSessionsQuery] = useState("");
   const [modelsQuery, setModelsQuery] = useState("");
   const [projectsQuery, setProjectsQuery] = useState("");
+  const [provider, setProvider] = useState(initialProviderScope);
   const [refreshing, setRefreshing] = useState(false);
   const skipNextPush = useRef(false);
   const queryClient = useQueryClient();
 
   const { data, isPending, isError, error } = useQuery({
-    queryKey: ["snapshot"],
-    queryFn: fetchSnapshot,
+    queryKey: ["snapshot", provider],
+    queryFn: () => fetchSnapshot(provider),
   });
 
   const go = (nextPage: Page) => setPage(nextPage);
+  const changeProvider = (nextProvider: typeof provider) => {
+    setProvider(nextProvider);
+    if (page.kind === "time-bucket") setPage({ kind: "time" });
+    if (page.kind === "context-session") setPage({ kind: "context-sessions" });
+    if (page.kind === "context-project") setPage({ kind: "context-projects" });
+  };
   const navigate = (request: NavRequest) => {
     setPage(request.page);
     if (request.query === undefined) return;
@@ -157,6 +180,10 @@ export function App() {
   }, [page]);
 
   useEffect(() => {
+    rememberProviderScope(provider);
+  }, [provider]);
+
+  useEffect(() => {
     const onPopState = () => {
       skipNextPush.current = true;
       setPage(pageFromPath(window.location.pathname));
@@ -169,7 +196,7 @@ export function App() {
     ? "Loading latest usage snapshot"
     : isError
       ? "Usage snapshot unavailable"
-      : `Usage snapshot generated ${data.generated_at.slice(0, 19).replace("T", " ")}`;
+      : `${providerLabel(provider)} · usage snapshot generated ${data.generated_at.slice(0, 19).replace("T", " ")}`;
 
   const renderPage = () => {
     switch (page.kind) {
@@ -208,30 +235,35 @@ export function App() {
   };
 
   return (
-    <NavProvider navigate={navigate}>
-      <Root className="cc-shell">
-        <Sidebar
-          brand="cc-session-explorer"
-          subtitle="Claude + Codex intelligence"
-          items={NAV}
-          active={navKindFor(page)}
-          onSelect={(kind) => go(pageForNavKind(kind))}
-        />
-        <main className="cc-main">
-          <header className="cc-page-header">
-            <div className="cc-page-heading">
-              <Breadcrumbs crumbs={breadcrumbs(page, go)} />
-              <h1>{pageTitle(page)}</h1>
-              <p className="cc-page-description">{pageDescription(page)}</p>
-              <div className="ju-muted cc-page-stamp">{stamp}</div>
-            </div>
-            <Button disabled={refreshing} onClick={refreshData}>
-              {refreshing ? "Refreshing…" : "Refresh active data"}
-            </Button>
-          </header>
-          <div className="cc-page-content">{renderPage()}</div>
-        </main>
-      </Root>
-    </NavProvider>
+    <ProviderScopeProvider provider={provider}>
+      <NavProvider navigate={navigate}>
+        <Root className="cc-shell">
+          <Sidebar
+            brand="cc-session-explorer"
+            subtitle="Claude + Codex intelligence"
+            items={NAV}
+            active={navKindFor(page)}
+            onSelect={(kind) => go(pageForNavKind(kind))}
+          />
+          <main className="cc-main">
+            <header className="cc-page-header">
+              <div className="cc-page-heading">
+                <Breadcrumbs crumbs={breadcrumbs(page, go)} />
+                <h1>{pageTitle(page)}</h1>
+                <p className="cc-page-description">{pageDescription(page)}</p>
+                <div className="ju-muted cc-page-stamp">{stamp}</div>
+              </div>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <SegmentedControl options={PROVIDER_OPTIONS} value={provider} onChange={changeProvider} />
+                <Button disabled={refreshing} onClick={refreshData}>
+                  {refreshing ? "Refreshing…" : "Refresh active data"}
+                </Button>
+              </div>
+            </header>
+            <div className="cc-page-content">{renderPage()}</div>
+          </main>
+        </Root>
+      </NavProvider>
+    </ProviderScopeProvider>
   );
 }

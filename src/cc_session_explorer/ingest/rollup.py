@@ -17,6 +17,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from cc_session_explorer.sources import provider_from_storage_key
+
 if TYPE_CHECKING:
     import sqlite3
 
@@ -55,7 +57,7 @@ ON CONFLICT(dimension, key) DO UPDATE SET
 """
 
 _SELECT_NEW = """
-SELECT rowid, session_key, project_name, model, day, week_bucket, hour_bucket, five_min_bucket,
+SELECT rowid, source, session_key, project_name, model, day, week_bucket, hour_bucket, five_min_bucket,
        timestamp, input_tokens, output_tokens, cache_read_input_tokens,
        cache_creation_5m_input_tokens + cache_creation_1h_input_tokens
            + cache_creation_unknown_tokens AS cache_creation_tokens,
@@ -105,6 +107,16 @@ def _watermark(conn: sqlite3.Connection) -> int:
         conn.execute("DELETE FROM usage_rollup")
         conn.execute("DELETE FROM usage_rollup_sessions")
         return 0
+    provider_dimensions = conn.execute(
+        "SELECT 1 FROM usage_rollup WHERE dimension IN ('claude:total', 'codex:total') LIMIT 1"
+    ).fetchone()
+    if mark and int(highest) and provider_dimensions is None:
+        # Pre-provider rollups contain the combined dimensions only. Rebuild once so changing
+        # the UI scope never falls back to request-time corpus scans.
+        logger.info("provider rollups missing; rebuilding the rollups")
+        conn.execute("DELETE FROM usage_rollup")
+        conn.execute("DELETE FROM usage_rollup_sessions")
+        return 0
     return mark
 
 
@@ -121,12 +133,13 @@ def derive_rollups(conn: sqlite3.Connection) -> int:
     for row in rows:
         highest = int(row["rowid"])
         session = str(row["session_key"] or "")
-        pairs = [TOTAL]
-        pairs.extend(
-            (dimension, str(row[column]))
-            for dimension, column in DIMENSIONS
-            if row[column] is not None
-        )
+        provider = provider_from_storage_key(row["source"])
+        pairs = [TOTAL, (f"{provider}:total", "")]
+        for dimension, column in DIMENSIONS:
+            if row[column] is None:
+                continue
+            key = str(row[column])
+            pairs.extend(((dimension, key), (f"{provider}:{dimension}", key)))
         for dimension, key in pairs:
             buckets.setdefault((dimension, key), _Bucket()).add(row)
             if session:

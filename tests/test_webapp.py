@@ -30,6 +30,14 @@ def test_spa_fallback_serves_the_shell_for_a_client_side_route(tmp_path: Path) -
     assert deep_link.text == root.text
 
 
+def test_packaged_spa_contains_the_provider_scope_control(tmp_path: Path) -> None:
+    app = create_app(ExplorerSettings(home_dir=tmp_path))
+    with TestClient(app) as client:
+        html = client.get("/").text
+    assert "cc-session-explorer-provider" in html
+    assert all(label in html for label in ("Both", "Claude Code", "Codex"))
+
+
 def test_spa_fallback_404s_an_unknown_api_path(tmp_path: Path) -> None:
     app = create_app(ExplorerSettings(home_dir=tmp_path))
     with TestClient(app) as client:

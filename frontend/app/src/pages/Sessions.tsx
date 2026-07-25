@@ -6,7 +6,7 @@ import { toContextSession, toModels, toProjects, useNavigate } from "../nav";
 const SESSIONS_PAGE_SIZE = 10;
 
 const matches = (row: RecentSession, query: string): boolean =>
-  [row.id, row.first_prompt, row.project, row.model]
+  [row.id, row.provider, row.first_prompt, row.project, row.model]
     .filter(Boolean)
     .join(" ")
     .toLowerCase()
@@ -14,6 +14,7 @@ const matches = (row: RecentSession, query: string): boolean =>
 
 const exportColumns: ExportColumn<RecentSession>[] = [
   { header: "session_id", value: (r) => r.id },
+  { header: "provider", value: (r) => r.provider },
   { header: "started_at", value: (r) => r.started_at },
   { header: "last_seen_at", value: (r) => r.last_seen_at },
   { header: "first_prompt", value: (r) => r.first_prompt },
@@ -50,6 +51,7 @@ export function Sessions({
       onClick: (r) => navigate(toContextSession(r.id)),
       extra: (r) => <div className="ju-muted">{(r.last_seen_at || r.started_at || "").slice(0, 16).replace("T", " ")}</div>,
     }),
+    { key: "provider", header: "provider", render: (r) => r.provider },
     {
       key: "prompt",
       header: "prompt / project",

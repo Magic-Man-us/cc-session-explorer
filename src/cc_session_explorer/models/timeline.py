@@ -182,7 +182,7 @@ class ProjectBreakdown(FrozenModel):
 
 
 class LedgerBucket(FrozenModel):
-    """One daily or weekly Claude Code ledger bucket, rolled up across projects.
+    """One daily or weekly provider-scoped ledger bucket, rolled up across projects.
 
     Carries both readings of a bucket. `aggregate`/`total_tokens` are the timeline's estimate of
     what *filled the context window*, by kind — content the API never bills for as such. The
@@ -223,7 +223,7 @@ class LedgerBucket(FrozenModel):
 
 
 class LedgerView(FrozenModel):
-    """Daily or weekly Claude Code usage ledger derived from local session transcripts."""
+    """Daily or weekly provider-scoped usage ledger derived from local session transcripts."""
 
     period: LedgerPeriod
     buckets: list[LedgerBucket] = Field(default_factory=lambda: list[LedgerBucket]())
