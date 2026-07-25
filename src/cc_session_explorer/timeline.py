@@ -68,9 +68,12 @@ from .models import (
 from .paths import SAFE_SESSION_ID, resolve_session_path
 from .sources import (
     Provider,
+    ProviderScope,
     TranscriptLocation,
     codex_identity,
     coerce_roots,
+    project_from_storage_key,
+    provider_source_predicate,
     source_identity,
 )
 from .tokens import estimate_tokens
@@ -586,7 +589,11 @@ def _bucket_of(day: date, period: LedgerPeriod) -> tuple[str, date, date]:
     return f"{iso_year}-W{iso_week:02d}", start, end
 
 
-def build_ledger(db_path: Path, period: LedgerPeriod) -> LedgerView:
+def build_ledger(
+    db_path: Path,
+    period: LedgerPeriod,
+    provider: ProviderScope = "all",
+) -> LedgerView:
     """Roll the store into daily or weekly buckets: estimated context by kind, and billed usage.
 
     Reads the rollups the ingest already maintains rather than replaying transcripts, so this
@@ -598,15 +605,19 @@ def build_ledger(db_path: Path, period: LedgerPeriod) -> LedgerView:
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
+        record_filter = provider_source_predicate(provider, "r.source")
+        source_filter = provider_source_predicate(provider)
         transcripts = conn.execute(
             "SELECT r.source AS source,"
             "       MAX(r.timestamp) AS last_seen,"
             "       COALESCE(MAX(s.size_bytes), 0) AS size_bytes"
             " FROM records r LEFT JOIN ingest_state s ON s.source = r.source"
-            " WHERE r.timestamp IS NOT NULL"
+            f" WHERE r.timestamp IS NOT NULL AND {record_filter}"
             " GROUP BY r.source"
         ).fetchall()
-        kind_rows = conn.execute("SELECT source, kind, count, tokens FROM session_kinds").fetchall()
+        kind_rows = conn.execute(
+            f"SELECT source, kind, count, tokens FROM session_kinds WHERE {source_filter}"
+        ).fetchall()
         # Billed usage carries its own day, and a request belongs to a session rather than to any
         # one of the files that session was split across — so it buckets by date, not by transcript.
         billed_rows = conn.execute(
@@ -617,7 +628,8 @@ def build_ledger(db_path: Path, period: LedgerPeriod) -> LedgerView:
             "       SUM(cache_creation_5m_input_tokens + cache_creation_1h_input_tokens"
             "           + cache_creation_unknown_tokens) AS cache_creation_tokens,"
             "       SUM(cost_usd) AS cost_usd"
-            " FROM usage_events WHERE day IS NOT NULL GROUP BY day"
+            f" FROM usage_events WHERE day IS NOT NULL AND {source_filter}"
+            " GROUP BY day"
         ).fetchall()
     except sqlite3.DatabaseError:
         logger.warning("could not read %s; serving an empty ledger", db_path)
@@ -645,7 +657,9 @@ def build_ledger(db_path: Path, period: LedgerPeriod) -> LedgerView:
             continue
         source = str(transcript["source"])
         acc = bucket_for(stamp)
-        acc.projects.add(source.split("/")[0])
+        project = project_from_storage_key(source)
+        if project:
+            acc.projects.add(project)
         acc.session_count += 1
         acc.size_bytes += int(transcript["size_bytes"])
         for row in kinds_by_source.get(source, []):

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button, Card, DataTable, ExportButtons, Input, Pagination, SegmentedControl, fmtInt, fmtTok, money, type ExportColumn } from "@cc-session/dashboard-ui";
 import type { DashboardSnapshot, Grain, TimeUsage } from "../api";
 import { toBar, usageBarChart } from "../shared";
@@ -48,6 +48,8 @@ export function Time({ data }: { data: DashboardSnapshot }) {
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [page, setPage] = useState(0);
+
+  useEffect(() => setPage(0), [data.provider]);
 
   const rows = useMemo(() => bucketRows(data, grain), [data, grain]);
   const inRange = (row: TimeUsage): boolean => {

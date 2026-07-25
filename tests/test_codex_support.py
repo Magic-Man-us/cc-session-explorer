@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -8,6 +9,7 @@ from fastapi.testclient import TestClient
 from cc_session_explorer.api import ExplorerSettings
 from cc_session_explorer.ingest import connect, ingest, search
 from cc_session_explorer.models import EventKind
+from cc_session_explorer.paths import DATA_DIR_NAME
 from cc_session_explorer.sources import TranscriptRoots
 from cc_session_explorer.timeline import discover_sessions, from_transcript, resolve_session
 from cc_session_explorer.usage.livelog import build_session_log
@@ -113,6 +115,46 @@ def _write_codex(path: Path, session_id: str = _SESSION_ID) -> Path:
     return path
 
 
+def _write_claude(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    records = [
+        {
+            "type": "user",
+            "uuid": "claude-user",
+            "sessionId": "claude-session",
+            "timestamp": "2026-07-25T14:00:00Z",
+            "message": {"role": "user", "content": "Inspect the Claude project."},
+        },
+        {
+            "type": "assistant",
+            "uuid": "claude-assistant",
+            "requestId": "claude-request",
+            "sessionId": "claude-session",
+            "timestamp": "2026-07-25T14:00:01Z",
+            "cwd": "/work/claude-project",
+            "message": {
+                "id": "claude-message",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-sonnet-4-6",
+                "content": [{"type": "text", "text": "Claude inspection complete."}],
+                "usage": {
+                    "input_tokens": 60,
+                    "output_tokens": 20,
+                    "cache_read_input_tokens": 10,
+                    "cache_creation_input_tokens": 0,
+                    "cache_creation": {
+                        "ephemeral_5m_input_tokens": 0,
+                        "ephemeral_1h_input_tokens": 0,
+                    },
+                },
+            },
+        },
+    ]
+    path.write_text("\n".join(json.dumps(record) for record in records) + "\n")
+    return path
+
+
 def test_codex_discovery_and_resolution_use_shared_roots(tmp_path: Path) -> None:
     path = _write_codex(
         tmp_path / ".codex" / "sessions" / "2026" / "07" / "25" / "rollout-session.jsonl"
@@ -200,3 +242,76 @@ def test_api_uses_configured_roots_for_codex(tmp_path: Path) -> None:
     assert sessions.json()[0]["provider"] == "codex"
     assert timeline.status_code == 200
     assert any(event["kind"] == "codex" for event in timeline.json()["events"])
+
+
+def test_provider_scope_filters_every_provider_spanning_api(tmp_path: Path) -> None:
+    _write_codex(tmp_path / ".codex" / "sessions" / "2026" / "07" / "25" / "rollout-session.jsonl")
+    _write_claude(tmp_path / ".claude" / "projects" / "claude-project" / "claude-session.jsonl")
+    store_db = tmp_path / DATA_DIR_NAME / "transcripts.db"
+    conn = connect(store_db)
+    try:
+        ingest(conn, TranscriptRoots.for_home(tmp_path))
+        conn.execute(
+            "UPDATE usage_rollup SET last_seen = ? WHERE dimension LIKE '%session'",
+            (datetime.now(UTC).isoformat(),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    client = TestClient(create_app(ExplorerSettings(home_dir=tmp_path)))
+
+    snapshots = {
+        provider: client.get("/api/snapshot", params={"provider": provider}).json()
+        for provider in ("all", "claude", "codex")
+    }
+    assert snapshots["all"]["totals"]["turns"] == 2
+    assert snapshots["all"]["totals"]["tokens"]["total_tokens"] == (
+        snapshots["claude"]["totals"]["tokens"]["total_tokens"]
+        + snapshots["codex"]["totals"]["tokens"]["total_tokens"]
+    )
+    assert snapshots["all"]["totals"]["raw_tokens"]["total_tokens"] == (
+        snapshots["claude"]["totals"]["raw_tokens"]["total_tokens"]
+        + snapshots["codex"]["totals"]["raw_tokens"]["total_tokens"]
+    )
+    assert {row["provider"] for row in snapshots["all"]["recent_sessions"]} == {
+        "claude",
+        "codex",
+    }
+    assert {row["provider"] for row in snapshots["claude"]["recent_sessions"]} == {"claude"}
+    assert {row["provider"] for row in snapshots["codex"]["recent_sessions"]} == {"codex"}
+    assert {row["model"] for row in snapshots["claude"]["models"]} == {"claude-sonnet-4-6"}
+    assert {row["model"] for row in snapshots["codex"]["models"]} == {"gpt-5.6-codex"}
+
+    for provider in ("claude", "codex"):
+        tail = client.get("/api/tail", params={"provider": provider}).json()
+        assert {row["provider"] for row in tail["events"]} == {provider}
+
+        bucket = client.get(
+            "/api/bucket",
+            params={"grain": "daily", "bucket": "2026-07-25", "provider": provider},
+        ).json()
+        assert {row["provider"] for row in bucket["session_rows"]} == {provider}
+
+        live = client.get(
+            "/api/live-sessions",
+            params={"window": 1440, "provider": provider},
+        ).json()
+        assert {row["provider"] for row in live["sessions"]} == {provider}
+
+        sessions = client.get("/timeline/sessions", params={"provider": provider}).json()
+        assert {row["provider"] for row in sessions} == {provider}
+
+        projects = client.get("/timeline/projects", params={"provider": provider}).json()
+        assert len(projects) == 1
+
+        ledger = client.get("/timeline/ledger", params={"provider": provider}).json()
+        assert ledger["session_count"] == 1
+
+    codex_search = client.get("/api/search", params={"q": "Implement", "provider": "codex"}).json()
+    claude_search = client.get(
+        "/api/search", params={"q": "Implement", "provider": "claude"}
+    ).json()
+    assert len(codex_search["hits"]) == 1
+    assert claude_search["hits"] == []
+    assert client.get("/api/snapshot", params={"provider": "other"}).status_code == 422

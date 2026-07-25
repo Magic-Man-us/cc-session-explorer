@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, DataTable, ExportButtons, LinkButton, Pagination, fmtTok, money, type ExportColumn } from "@cc-session/dashboard-ui";
 import { fetchTail, type UsageEvent } from "../api";
 import { toContextSession, toModels, toProjects, useNavigate } from "../nav";
+import { providerLabel, useProviderScope } from "../provider";
 
 const TAIL_LIMIT = 80;
 const POLL_MS = 5000;
@@ -10,6 +11,7 @@ const TAIL_PAGE_SIZE = 10;
 
 const tailExportColumns: ExportColumn<UsageEvent>[] = [
   { header: "key", value: (r) => r.key },
+  { header: "provider", value: (r) => r.provider },
   { header: "timestamp", value: (r) => r.timestamp },
   { header: "session_id", value: (r) => r.session_id },
   { header: "project", value: (r) => r.project },
@@ -24,11 +26,12 @@ const tailExportColumns: ExportColumn<UsageEvent>[] = [
  *  Live Feed (session picker + full raw log) instead. */
 export function LiveTail() {
   const navigate = useNavigate();
+  const provider = useProviderScope();
   const [enabled, setEnabled] = useState(true);
   const [page, setPage] = useState(0);
   const { data: tail, isPending, isError, error } = useQuery({
-    queryKey: ["live", "tail", TAIL_LIMIT],
-    queryFn: () => fetchTail(TAIL_LIMIT),
+    queryKey: ["live", "tail", TAIL_LIMIT, provider],
+    queryFn: () => fetchTail(TAIL_LIMIT, provider),
     refetchInterval: enabled ? POLL_MS : false,
   });
   const events = tail?.events ?? [];
@@ -39,6 +42,8 @@ export function LiveTail() {
     : isError
       ? error.message
       : "Updated " + (tail?.generated_at.slice(11, 19) ?? "");
+
+  useEffect(() => setPage(0), [provider]);
 
   return (
     <Card
@@ -54,7 +59,7 @@ export function LiveTail() {
       }
     >
       <div className="ju-muted" style={{ fontSize: 12, marginBottom: 8 }}>
-        The last {TAIL_LIMIT} priced usage events, across every session — {money(tail?.total_cost_usd)} total.
+        The last {TAIL_LIMIT} priced usage events for {providerLabel(provider)} — {money(tail?.total_cost_usd)} total.
       </div>
       <DataTable
         rows={pageEvents}
@@ -66,7 +71,7 @@ export function LiveTail() {
             render: (r) => (
               <>
                 <div className="ju-mono">{(r.timestamp || "").slice(0, 19).replace("T", " ")}</div>
-                <div className="ju-muted">{r.source_kind}</div>
+                <div className="ju-muted">{r.provider} · {r.source_kind}</div>
               </>
             ),
           },

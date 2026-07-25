@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Card, KpiCard, StatBar, downloadJSON, fmtInt, fmtTok, money } from "@cc-session/dashboard-ui";
 import type { DashboardSnapshot } from "../api";
 import { Sankey } from "../Sankey";
@@ -11,6 +11,8 @@ export function Overview({ data }: { data: DashboardSnapshot }) {
   const [day, setDay] = useState("");
   const t = data.totals;
   const days = data.daily.slice(-42).map((d) => toBar(d.day, d.tokens, `${d.day} · ${fmtTok(d.tokens.total_tokens)} tokens · ${d.sessions} sessions`));
+
+  useEffect(() => setDay(""), [data.provider]);
 
   return (
     <div className="cc-dashboard">

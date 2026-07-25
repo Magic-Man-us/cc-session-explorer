@@ -28,6 +28,7 @@ from cc_session_explorer.history.pricing import (
     estimate_detailed_cost,
 )
 from cc_session_explorer.ingest.types import SessionId
+from cc_session_explorer.sources import Provider
 from cc_session_explorer.types import CostUsd, ModelKey, RequestCount, TokenCount
 
 logger = logging.getLogger(__name__)
@@ -228,7 +229,9 @@ class _RawTotals:
         self.cache_creation_tokens += usage.cache_creation_input_tokens
 
 
-def _accumulate_raw(conn: sqlite3.Connection, raw: _RawTotals) -> None:
+def _accumulate_raw(
+    conn: sqlite3.Connection, raw: _RawTotals, provider: Provider = "claude"
+) -> None:
     if not raw.rows:
         return
     conn.execute(
@@ -242,6 +245,26 @@ def _accumulate_raw(conn: sqlite3.Connection, raw: _RawTotals) -> None:
         " raw_cache_creation_tokens ="
         " raw_cache_creation_tokens + excluded.raw_cache_creation_tokens",
         (
+            raw.rows,
+            raw.input_tokens,
+            raw.output_tokens,
+            raw.cache_read_tokens,
+            raw.cache_creation_tokens,
+        ),
+    )
+    conn.execute(
+        "INSERT INTO provider_usage_totals"
+        " (provider, assistant_usage_rows, raw_input_tokens, raw_output_tokens,"
+        " raw_cache_read_tokens, raw_cache_creation_tokens) VALUES (?, ?, ?, ?, ?, ?)"
+        " ON CONFLICT(provider) DO UPDATE SET"
+        " assistant_usage_rows = assistant_usage_rows + excluded.assistant_usage_rows,"
+        " raw_input_tokens = raw_input_tokens + excluded.raw_input_tokens,"
+        " raw_output_tokens = raw_output_tokens + excluded.raw_output_tokens,"
+        " raw_cache_read_tokens = raw_cache_read_tokens + excluded.raw_cache_read_tokens,"
+        " raw_cache_creation_tokens ="
+        " raw_cache_creation_tokens + excluded.raw_cache_creation_tokens",
+        (
+            provider,
             raw.rows,
             raw.input_tokens,
             raw.output_tokens,
@@ -307,6 +330,7 @@ def derive_session_usage(conn: sqlite3.Connection, session: Session, source: str
     second accounting model. Re-reading a grown rollout is safe: usage keys are idempotent.
     """
     added = 0
+    raw = _RawTotals()
     for line_no, record in enumerate(session.assistant_requests(), start=1):
         before = conn.total_changes
         try:
@@ -317,6 +341,8 @@ def derive_session_usage(conn: sqlite3.Connection, session: Session, source: str
         conn.execute(_INSERT_USAGE, usage_row.model_dump())
         if conn.total_changes > before:
             added += 1
+            raw.add(record)
+    _accumulate_raw(conn, raw, "codex")
     conn.commit()
     return added
 

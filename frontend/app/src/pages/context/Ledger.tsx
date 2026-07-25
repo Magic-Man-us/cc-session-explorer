@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, EmptyState, FilterableTable, LoadingState, SegmentedControl, fmtTok, money, type ExportColumn } from "@cc-session/dashboard-ui";
 import { fetchContextLedger, type LedgerBucket } from "../../api";
 import { kindPills } from "./shared";
+import { useProviderScope } from "../../provider";
 
 const LEDGER_PAGE_SIZE = 10;
 
@@ -23,12 +24,15 @@ const ledgerExportColumns: ExportColumn<LedgerBucket>[] = [
 
 /** Context lens: the context-token ledger, bucketed daily or weekly. */
 export function ContextLedger() {
+  const provider = useProviderScope();
   const [period, setPeriod] = useState<"daily" | "weekly">("daily");
   const [page, setPage] = useState(0);
   const { data: ledger, isError, error } = useQuery({
-    queryKey: ["context", "ledger", period],
-    queryFn: () => fetchContextLedger(period),
+    queryKey: ["context", "ledger", period, provider],
+    queryFn: () => fetchContextLedger(period, provider),
   });
+
+  useEffect(() => setPage(0), [provider]);
 
   if (isError) return <EmptyState>{error.message}</EmptyState>;
 

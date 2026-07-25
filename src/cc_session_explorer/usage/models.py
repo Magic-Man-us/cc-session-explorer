@@ -16,7 +16,7 @@ from cc_session_explorer.base import FrozenModel
 from cc_session_explorer.ingest import SearchHit
 from cc_session_explorer.ingest.types import SessionId
 from cc_session_explorer.models.timeline import token_total
-from cc_session_explorer.sources import Provider
+from cc_session_explorer.sources import Provider, ProviderScope
 from cc_session_explorer.types import CostUsd, ModelKey, TokenCount
 
 Role = Literal["user", "assistant"]
@@ -67,6 +67,7 @@ class DataSourceStats(FrozenModel):
 
 class RecentSession(FrozenModel):
     id: str
+    provider: Provider
     started_at: str | None
     last_seen_at: str | None
     first_prompt: str | None
@@ -110,6 +111,7 @@ class TimeUsage(FrozenModel):
 
 
 class DashboardSnapshot(FrozenModel):
+    provider: ProviderScope
     generated_at: str
     totals: DashboardTotals
     source: DataSourceStats
@@ -125,6 +127,7 @@ class DashboardSnapshot(FrozenModel):
 
 class UsageEvent(FrozenModel):
     key: str
+    provider: Provider
     timestamp: str | None
     session_id: SessionId | None
     project: str | None
@@ -142,6 +145,7 @@ class UsageTail(FrozenModel):
 
 class BucketSessionUsage(FrozenModel):
     session_id: SessionId
+    provider: Provider
     project: str | None
     model: str | None
     first_seen_at: str | None
@@ -294,6 +298,7 @@ class LiveFeedItem(FrozenModel):
 
     cursor: int
     session_id: SessionId
+    provider: Provider
     project: str
     kind: str
     is_sidechain: bool = False

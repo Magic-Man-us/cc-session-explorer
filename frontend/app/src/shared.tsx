@@ -30,11 +30,13 @@ import {
 } from "./api";
 import { costColumn, modelLinkColumn, projectLinkColumn, sessionLinkColumn, tokensColumn, turnsColumn } from "./components/columns";
 import { toContextSession, toModels, toProjects, useNavigate } from "./nav";
+import { useProviderScope } from "./provider";
 
 const BUCKET_SESSIONS_PAGE_SIZE = 10;
 
 const bucketSessionExportColumns: ExportColumn<BucketSessionUsage>[] = [
   { header: "session_id", value: (r) => r.session_id },
+  { header: "provider", value: (r) => r.provider },
   { header: "project", value: (r) => r.project },
   { header: "model", value: (r) => r.model },
   { header: "first_seen_at", value: (r) => r.first_seen_at },
@@ -105,6 +107,7 @@ const display = (event: TimelineEvent): EventDisplay => {
 /** One timeline event. When `session` is set and the block was clipped, a "show full" control
  *  fetches the untruncated block on demand. */
 export function TimelineEventRow({ event, session }: { event: TimelineEvent; session?: string }) {
+  const provider = useProviderScope();
   const [full, setFull] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const info = display(event);
@@ -114,7 +117,7 @@ export function TimelineEventRow({ event, session }: { event: TimelineEvent; ses
   const showFull = () => {
     if (event.ref === null || session === undefined) return;
     setLoading(true);
-    fetchBlock(session, event.ref.record_id, event.ref.block_index)
+    fetchBlock(session, event.ref.record_id, event.ref.block_index, provider)
       .then((b) => setFull(b.text))
       .catch(() => setFull(info.text))
       .finally(() => setLoading(false));
@@ -146,6 +149,7 @@ function SessionTimelineView({
   grain: string;
   bucket: string;
 }) {
+  const provider = useProviderScope();
   const [timeline, setTimeline] = useState<SessionTimeline | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -153,13 +157,13 @@ function SessionTimelineView({
     let live = true;
     setTimeline(null);
     setError(null);
-    fetchSessionTimeline(session, grain, bucket)
+    fetchSessionTimeline(session, grain, bucket, provider)
       .then((t) => live && setTimeline(t))
       .catch((e: Error) => live && setError(e.message));
     return () => {
       live = false;
     };
-  }, [session, grain, bucket]);
+  }, [session, grain, bucket, provider]);
 
   if (error !== null || timeline === null) {
     return (
@@ -204,6 +208,7 @@ const bucketSessionColumns = (navigate: ReturnType<typeof useNavigate>) => {
       onClick: (r) => navigate(toContextSession(r.session_id)),
       extra: (r) => (r.project ? <div className="ju-muted ju-clip">{projectColumn.render(r)}</div> : null),
     }),
+    { key: "provider", header: "provider", render: (r: BucketSessionUsage) => r.provider },
     modelLinkColumn<BucketSessionUsage>({ modelOf: (r) => r.model, onClick: (model) => navigate(toModels(model)) }),
     tokensColumn<BucketSessionUsage>((r) => r.tokens.total_tokens),
     costColumn<BucketSessionUsage>((r) => r.notional_cost_usd),
@@ -222,6 +227,7 @@ export function BucketDetailPanel({
   hint: string;
 }) {
   const navigate = useNavigate();
+  const provider = useProviderScope();
   const [detail, setDetail] = useState<BucketDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState("");
@@ -234,13 +240,13 @@ export function BucketDetailPanel({
     setError(null);
     setExpanded("");
     setPage(0);
-    fetchBucket(grain, bucket)
+    fetchBucket(grain, bucket, provider)
       .then((d) => live && setDetail(d))
       .catch((e: Error) => live && setError(e.message));
     return () => {
       live = false;
     };
-  }, [grain, bucket]);
+  }, [grain, bucket, provider]);
 
   if (!bucket) {
     return (

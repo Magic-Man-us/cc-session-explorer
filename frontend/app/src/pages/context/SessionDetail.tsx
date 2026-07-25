@@ -10,12 +10,14 @@ import {
 } from "../../api";
 import { TimelineEventRow } from "../../shared";
 import { toSessions, useNavigate } from "../../nav";
+import { useProviderScope } from "../../provider";
 import { KIND_ACCENT, assignSankeyColors, groupExportColumns } from "./shared";
 
 /** Everything about one session — grouped context chains, the full raw event-by-event
  *  transcript, and the cross-links out. Its own page: `/context/sessions/:id`. */
 export function ContextSessionDetail({ session }: { session: string }) {
   const navigate = useNavigate();
+  const provider = useProviderScope();
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
 
   const {
@@ -23,14 +25,20 @@ export function ContextSessionDetail({ session }: { session: string }) {
     isPending: sankeyPending,
     isError: sankeyIsError,
     error: sankeyError,
-  } = useQuery({ queryKey: ["context", "session", session, "sankey"], queryFn: () => fetchContextSankeyData(session) });
+  } = useQuery({
+    queryKey: ["context", "session", session, "sankey", provider],
+    queryFn: () => fetchContextSankeyData(session, provider),
+  });
 
   const {
     data: groups,
     isPending: groupsPending,
     isError: groupsIsError,
     error: groupsError,
-  } = useQuery({ queryKey: ["context", "session", session, "grouped"], queryFn: () => fetchContextGrouped(session) });
+  } = useQuery({
+    queryKey: ["context", "session", session, "grouped", provider],
+    queryFn: () => fetchContextGrouped(session, provider),
+  });
 
   const {
     data: transcriptData,
@@ -41,8 +49,8 @@ export function ContextSessionDetail({ session }: { session: string }) {
     hasNextPage,
     isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ["context", "session", session, "transcript"],
-    queryFn: ({ pageParam }) => fetchSessionTranscript(session, pageParam),
+    queryKey: ["context", "session", session, "transcript", provider],
+    queryFn: ({ pageParam }) => fetchSessionTranscript(session, pageParam, provider),
     initialPageParam: undefined as number | undefined,
     getNextPageParam: (lastPage) => (lastPage.truncated ? lastPage.cursor : undefined),
   });
@@ -68,7 +76,7 @@ export function ContextSessionDetail({ session }: { session: string }) {
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
               <span className="ju-muted" style={{ fontSize: 12 }}>token, cost, and tool-activity flow for this session</span>
-              <a className="ju-link" href={contextSankeyUrl(session)} target="_blank" rel="noreferrer">
+              <a className="ju-link" href={contextSankeyUrl(session, provider)} target="_blank" rel="noreferrer">
                 Open standalone Sankey page ↗
               </a>
             </div>
@@ -84,14 +92,14 @@ export function ContextSessionDetail({ session }: { session: string }) {
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <a
           className="ju-button ju-button--ghost"
-          href={contextInvestigationUrl(session, "markdown")}
+          href={contextInvestigationUrl(session, "markdown", provider)}
           download={`investigation-${session.slice(0, 12)}.md`}
         >
           Download investigation record (Markdown)
         </a>
         <a
           className="ju-button ju-button--ghost"
-          href={contextInvestigationUrl(session, "json")}
+          href={contextInvestigationUrl(session, "json", provider)}
           download={`investigation-${session.slice(0, 12)}.json`}
         >
           Download investigation record (JSON)

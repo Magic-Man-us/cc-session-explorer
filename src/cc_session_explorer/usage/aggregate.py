@@ -18,6 +18,12 @@ from pydantic import ValidationError
 from cc_session_explorer.buckets import project_name, session_key
 from cc_session_explorer.ingest import search_readonly
 from cc_session_explorer.ingest.rollup import DIMENSIONS
+from cc_session_explorer.sources import (
+    ProviderScope,
+    provider_dimension,
+    provider_from_storage_key,
+    provider_source_predicate,
+)
 from cc_session_explorer.usage.livelog import log_summary
 from cc_session_explorer.usage.models import (
     BucketDetail,
@@ -129,12 +135,27 @@ def _open(store_db: Path) -> sqlite3.Connection | None:
     return conn
 
 
-def _dimension(conn: sqlite3.Connection, dimension: str, order: str) -> list[sqlite3.Row]:
-    return conn.execute(f"{_ROLLUP} ORDER BY {order}", (dimension,)).fetchall()
+def _dimension(
+    conn: sqlite3.Connection,
+    dimension: str,
+    order: str,
+    provider: ProviderScope = "all",
+) -> list[sqlite3.Row]:
+    scoped = provider_dimension(provider, dimension)
+    return conn.execute(f"{_ROLLUP} ORDER BY {order}", (scoped,)).fetchall()
 
 
-def _total(conn: sqlite3.Connection) -> sqlite3.Row | None:
-    return conn.execute(f"{_ROLLUP} AND r.key = ''", ("total",)).fetchone()
+def _total(conn: sqlite3.Connection, provider: ProviderScope = "all") -> sqlite3.Row | None:
+    dimension = provider_dimension(provider, "total")
+    return conn.execute(f"{_ROLLUP} AND r.key = ''", (dimension,)).fetchone()
+
+
+def _source_name(provider: ProviderScope) -> str:
+    if provider == "claude":
+        return "Claude Code transcripts (cc-session-core)"
+    if provider == "codex":
+        return "Codex transcripts (cc-session-core)"
+    return _SOURCE_NAME
 
 
 def _time_usage(rows: list[sqlite3.Row]) -> list[TimeUsage]:
@@ -168,9 +189,14 @@ def _totals(row: sqlite3.Row | None, corpus: ScanResult) -> DashboardTotals:
     )
 
 
-def _source(row: sqlite3.Row | None, corpus: ScanResult, store_db: Path) -> DataSourceStats:
+def _source(
+    row: sqlite3.Row | None,
+    corpus: ScanResult,
+    store_db: Path,
+    provider: ProviderScope,
+) -> DataSourceStats:
     return DataSourceStats(
-        name=_SOURCE_NAME,
+        name=_source_name(provider),
         db_path=str(store_db),
         total_records=corpus.records,
         transcript_files=corpus.files,
@@ -183,15 +209,20 @@ def _source(row: sqlite3.Row | None, corpus: ScanResult, store_db: Path) -> Data
     )
 
 
-def _recent_sessions(conn: sqlite3.Connection, store_db: Path) -> list[RecentSession]:
+def _recent_sessions(
+    conn: sqlite3.Connection,
+    store_db: Path,
+    provider: ProviderScope,
+) -> list[RecentSession]:
     rows = conn.execute(
         f"{_ROLLUP} ORDER BY r.last_seen DESC LIMIT ?",
-        ("session", _RECENT_SESSIONS_MAX),
+        (provider_dimension(provider, "session"), _RECENT_SESSIONS_MAX),
     ).fetchall()
     meta = session_meta(store_db, [str(row["key"]) for row in rows])
     return [
         RecentSession(
             id=str(row["key"]),
+            provider=meta[str(row["key"])].provider if str(row["key"]) in meta else "claude",
             started_at=_iso(row["first_seen"]),
             last_seen_at=_iso(row["last_seen"]),
             first_prompt=meta[str(row["key"])].first_prompt if str(row["key"]) in meta else None,
@@ -205,9 +236,9 @@ def _recent_sessions(conn: sqlite3.Connection, store_db: Path) -> list[RecentSes
     ]
 
 
-def _empty_stats(store_db: Path) -> DataSourceStats:
+def _empty_stats(store_db: Path, provider: ProviderScope = "all") -> DataSourceStats:
     return DataSourceStats(
-        name=_SOURCE_NAME,
+        name=_source_name(provider),
         db_path=str(store_db),
         total_records=0,
         transcript_files=0,
@@ -220,8 +251,9 @@ def _empty_stats(store_db: Path) -> DataSourceStats:
     )
 
 
-def _empty_snapshot(store_db: Path) -> DashboardSnapshot:
+def _empty_snapshot(store_db: Path, provider: ProviderScope = "all") -> DashboardSnapshot:
     return DashboardSnapshot(
+        provider=provider,
         generated_at=_now(),
         totals=DashboardTotals(
             tokens=_EMPTY_TOKENS,
@@ -232,7 +264,7 @@ def _empty_snapshot(store_db: Path) -> DashboardSnapshot:
             duplicate_usage_rows=0,
             notional_cost_usd=0.0,
         ),
-        source=_empty_stats(store_db),
+        source=_empty_stats(store_db, provider),
         recent_sessions=[],
         models=[],
         projects=[],
@@ -244,23 +276,24 @@ def _empty_snapshot(store_db: Path) -> DashboardSnapshot:
     )
 
 
-def build_snapshot(store_db: Path) -> DashboardSnapshot:
+def build_snapshot(store_db: Path, provider: ProviderScope = "all") -> DashboardSnapshot:
     """The one payload behind most of the SPA: totals, rollups, and time buckets."""
     conn = _open(store_db)
     if conn is None:
-        return _empty_snapshot(store_db)
-    corpus = scan_store(store_db)
+        return _empty_snapshot(store_db, provider)
+    corpus = scan_store(store_db, provider)
     try:
-        overall = _total(conn)
+        overall = _total(conn, provider)
         buckets = {
-            grain: _time_usage(_dimension(conn, dimension, "r.key"))
+            grain: _time_usage(_dimension(conn, dimension, "r.key", provider))
             for grain, dimension in _GRAINS.items()
         }
         return DashboardSnapshot(
+            provider=provider,
             generated_at=_now(),
             totals=_totals(overall, corpus),
-            source=_source(overall, corpus, store_db),
-            recent_sessions=_recent_sessions(conn, store_db),
+            source=_source(overall, corpus, store_db, provider),
+            recent_sessions=_recent_sessions(conn, store_db, provider),
             models=[
                 ModelUsage(
                     model=str(row["key"] or "unknown"),
@@ -269,7 +302,7 @@ def build_snapshot(store_db: Path) -> DashboardSnapshot:
                     sessions=int(row["sessions"]),
                     notional_cost_usd=round(float(row["cost_usd"]), 4),
                 )
-                for row in _dimension(conn, "model", "r.cost_usd DESC")
+                for row in _dimension(conn, "model", "r.cost_usd DESC", provider)
             ],
             projects=[
                 ProjectUsage(
@@ -279,7 +312,7 @@ def build_snapshot(store_db: Path) -> DashboardSnapshot:
                     sessions=int(row["sessions"]),
                     notional_cost_usd=round(float(row["cost_usd"]), 4),
                 )
-                for row in _dimension(conn, "project", "r.cost_usd DESC")
+                for row in _dimension(conn, "project", "r.cost_usd DESC", provider)
             ],
             daily=[
                 DailyUsage(
@@ -300,19 +333,21 @@ def build_snapshot(store_db: Path) -> DashboardSnapshot:
         conn.close()
 
 
-def build_tail(store_db: Path, limit: int) -> UsageTail:
+def build_tail(store_db: Path, limit: int, provider: ProviderScope = "all") -> UsageTail:
     """The most recent ``limit`` usage turns, newest first."""
     conn = _open(store_db)
     if conn is None:
         return UsageTail(generated_at=_now(), total_cost_usd=0.0, events=[])
     try:
-        overall = _total(conn)
+        overall = _total(conn, provider)
+        source_filter = provider_source_predicate(provider)
         rows = conn.execute(
-            "SELECT usage_key, timestamp, session_key, project_name, model, input_tokens,"
+            "SELECT usage_key, source, timestamp, session_key, project_name, model, input_tokens,"
             " output_tokens, cache_read_input_tokens AS cache_read_tokens,"
             " cache_creation_5m_input_tokens + cache_creation_1h_input_tokens"
             " + cache_creation_unknown_tokens AS cache_creation_tokens, cost_usd"
-            " FROM usage_events ORDER BY timestamp DESC LIMIT ?",
+            f" FROM usage_events WHERE {source_filter}"
+            " ORDER BY timestamp DESC LIMIT ?",
             (limit,),
         ).fetchall()
     finally:
@@ -323,6 +358,7 @@ def build_tail(store_db: Path, limit: int) -> UsageTail:
         events=[
             UsageEvent(
                 key=str(row["usage_key"]),
+                provider=provider_from_storage_key(row["source"]),
                 timestamp=_iso(row["timestamp"]),
                 session_id=str(row["session_key"]) if row["session_key"] else None,
                 project=str(row["project_name"]) if row["project_name"] else None,
@@ -336,7 +372,12 @@ def build_tail(store_db: Path, limit: int) -> UsageTail:
     )
 
 
-def build_bucket(store_db: Path, grain: str, bucket: str) -> BucketDetail | None:
+def build_bucket(
+    store_db: Path,
+    grain: str,
+    bucket: str,
+    provider: ProviderScope = "all",
+) -> BucketDetail | None:
     """One time bucket expanded into its per-session rows.
 
     An unreadable/missing store or an unrecognised grain serves the dashboard's empty shape
@@ -359,12 +400,13 @@ def build_bucket(store_db: Path, grain: str, bucket: str) -> BucketDetail | None
     try:
         overall = conn.execute(
             f"{_ROLLUP} AND r.key = ?",
-            (_GRAINS[grain], bucket),
+            (provider_dimension(provider, _GRAINS[grain]), bucket),
         ).fetchone()
         if overall is None:
             return None
         # The per-session split of one bucket is the one figure not worth its own rollup: it is
         # (grain x bucket x session), and it is only ever asked for one bucket, off an index.
+        source_filter = provider_source_predicate(provider)
         rows = conn.execute(
             "SELECT session_key, model,"
             " COALESCE(SUM(input_tokens), 0) AS input_tokens,"
@@ -375,6 +417,7 @@ def build_bucket(store_db: Path, grain: str, bucket: str) -> BucketDetail | None
             " COUNT(*) AS turns, COALESCE(SUM(cost_usd), 0.0) AS cost_usd,"
             " MIN(timestamp) AS first_seen, MAX(timestamp) AS last_seen"
             f" FROM usage_events WHERE {_GRAIN_COLUMNS[grain]} = ?"
+            f" AND {source_filter}"
             " GROUP BY session_key ORDER BY cost_usd DESC",
             (bucket,),
         ).fetchall()
@@ -391,6 +434,9 @@ def build_bucket(store_db: Path, grain: str, bucket: str) -> BucketDetail | None
         session_rows=[
             BucketSessionUsage(
                 session_id=str(row["session_key"]),
+                provider=meta[str(row["session_key"])].provider
+                if str(row["session_key"]) in meta
+                else "claude",
                 project=meta[str(row["session_key"])].project
                 if str(row["session_key"]) in meta
                 else None,
@@ -406,7 +452,11 @@ def build_bucket(store_db: Path, grain: str, bucket: str) -> BucketDetail | None
     )
 
 
-def build_live_sessions(store_db: Path, window_minutes: int) -> LiveSessions:
+def build_live_sessions(
+    store_db: Path,
+    window_minutes: int,
+    provider: ProviderScope = "all",
+) -> LiveSessions:
     """Sessions with activity inside the trailing window, most recent first.
 
     Sourced from the store, so this trails a live session by the watcher's debounce — immaterial
@@ -419,8 +469,8 @@ def build_live_sessions(store_db: Path, window_minutes: int) -> LiveSessions:
     try:
         rows = conn.execute(
             "SELECT key, turns, first_seen, last_seen FROM usage_rollup"
-            " WHERE dimension = 'session' AND last_seen >= ? ORDER BY last_seen DESC",
-            (cutoff.isoformat(),),
+            " WHERE dimension = ? AND last_seen >= ? ORDER BY last_seen DESC",
+            (provider_dimension(provider, "session"), cutoff.isoformat()),
         ).fetchall()
     finally:
         conn.close()
@@ -465,7 +515,12 @@ def _preview(text: object, raw: object, kind: str) -> str:
     return f"({kind})"
 
 
-def build_live_feed(store_db: Path, after: int, limit: int) -> LiveFeed:
+def build_live_feed(
+    store_db: Path,
+    after: int,
+    limit: int,
+    provider: ProviderScope = "all",
+) -> LiveFeed:
     """Every record ingested after cursor ``after``, newest first, each filed to its session.
 
     Reads the record archive the watcher keeps current, so the feed spans all sessions at once and
@@ -478,9 +533,11 @@ def build_live_feed(store_db: Path, after: int, limit: int) -> LiveFeed:
     conn = sqlite3.connect(f"file:{store_db}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
+        source_filter = provider_source_predicate(provider)
         rows = conn.execute(
             "SELECT id, source, session_id, type, timestamp, text, raw"
-            " FROM records WHERE id > ? ORDER BY id DESC LIMIT ?",
+            f" FROM records WHERE id > ? AND {source_filter}"
+            " ORDER BY id DESC LIMIT ?",
             (after, limit),
         ).fetchall()
     except sqlite3.DatabaseError:
@@ -497,6 +554,7 @@ def build_live_feed(store_db: Path, after: int, limit: int) -> LiveFeed:
             LiveFeedItem(
                 cursor=int(row["id"]),
                 session_id=session,
+                provider=provider_from_storage_key(str(row["source"])),
                 project=project_name(str(row["source"]), None) or "",
                 kind=str(row["type"]),
                 # A record whose own sessionId is not its transcript is a subagent sidechain,
@@ -509,6 +567,14 @@ def build_live_feed(store_db: Path, after: int, limit: int) -> LiveFeed:
     return LiveFeed(generated_at=_now(), cursor=cursor, items=items)
 
 
-def build_search(transcripts_db: Path, q: str, limit: int) -> SearchResults:
+def build_search(
+    transcripts_db: Path,
+    q: str,
+    limit: int,
+    provider: ProviderScope = "all",
+) -> SearchResults:
     """Full-text search over the local transcript archive, best match first."""
-    return SearchResults(query=q, hits=search_readonly(transcripts_db, q, limit))
+    return SearchResults(
+        query=q,
+        hits=search_readonly(transcripts_db, q, limit, provider),
+    )

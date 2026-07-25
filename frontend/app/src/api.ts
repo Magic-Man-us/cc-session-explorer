@@ -1,4 +1,7 @@
 import type { TokenBreakdown } from "@cc-session/dashboard-ui";
+import type { ProviderScope } from "./provider";
+
+export type Provider = "claude" | "codex";
 
 // Types mirror the backend's Pydantic payloads (src/cc_session_explorer/usage/models.py).
 // TokenBreakdown is reused from the design system so the shape stays shared.
@@ -15,6 +18,7 @@ export interface DashboardTotals {
 
 export interface RecentSession {
   id: string;
+  provider: Provider;
   started_at: string | null;
   last_seen_at: string | null;
   first_prompt: string | null;
@@ -59,6 +63,7 @@ export interface TimeUsage {
 
 export interface UsageEvent {
   key: string;
+  provider: Provider;
   timestamp: string | null;
   session_id: string | null;
   project: string | null;
@@ -76,6 +81,7 @@ export interface UsageTail {
 
 export interface BucketSessionUsage {
   session_id: string;
+  provider: Provider;
   project: string | null;
   model: string | null;
   first_seen_at: string | null;
@@ -158,7 +164,7 @@ export interface BlockContent {
 
 export interface LiveSession {
   session_id: string;
-  provider: "claude" | "codex";
+  provider: Provider;
   project: string | null;
   first_prompt: string | null;
   first_seen_at: string | null;
@@ -175,6 +181,7 @@ export interface LiveSessions {
 export interface LiveFeedItem {
   cursor: number;
   session_id: string;
+  provider: Provider;
   project: string;
   kind: string;
   is_sidechain: boolean;
@@ -216,6 +223,7 @@ export interface DataSourceStats {
 }
 
 export interface DashboardSnapshot {
+  provider: ProviderScope;
   generated_at: string;
   totals: DashboardTotals;
   source: DataSourceStats;
@@ -237,38 +245,61 @@ async function getJSON<T>(url: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-export const fetchSnapshot = (): Promise<DashboardSnapshot> =>
-  getJSON<DashboardSnapshot>("/api/snapshot");
+export const fetchSnapshot = (provider: ProviderScope = "all"): Promise<DashboardSnapshot> =>
+  getJSON<DashboardSnapshot>(`/api/snapshot?${new URLSearchParams({ provider })}`);
 
-export const fetchTail = (limit = 80): Promise<UsageTail> =>
-  getJSON<UsageTail>(`/api/tail?limit=${limit}`);
+export const fetchTail = (limit = 80, provider: ProviderScope = "all"): Promise<UsageTail> =>
+  getJSON<UsageTail>(`/api/tail?${new URLSearchParams({ limit: String(limit), provider })}`);
 
-export const fetchBucket = (grain: string, bucket: string): Promise<BucketDetail> =>
-  getJSON<BucketDetail>(`/api/bucket?${new URLSearchParams({ grain, bucket })}`);
+export const fetchBucket = (
+  grain: string,
+  bucket: string,
+  provider: ProviderScope = "all",
+): Promise<BucketDetail> =>
+  getJSON<BucketDetail>(`/api/bucket?${new URLSearchParams({ grain, bucket, provider })}`);
 
 export const fetchSessionTimeline = (
   session: string,
   grain: string,
   bucket: string,
+  provider: ProviderScope = "all",
 ): Promise<SessionTimeline> =>
-  getJSON<SessionTimeline>(`/api/session-timeline?${new URLSearchParams({ session, grain, bucket })}`);
-
-export const fetchLiveSessions = (window = 30): Promise<LiveSessions> =>
-  getJSON<LiveSessions>(`/api/live-sessions?${new URLSearchParams({ window: String(window) })}`);
-
-export const fetchLiveFeed = (after = 0, limit = 100): Promise<LiveFeed> =>
-  getJSON<LiveFeed>(
-    `/api/live-feed?${new URLSearchParams({ after: String(after), limit: String(limit) })}`,
+  getJSON<SessionTimeline>(
+    `/api/session-timeline?${new URLSearchParams({ session, grain, bucket, provider })}`,
   );
 
-export const fetchSearch = (q: string, limit = 20): Promise<SearchResults> =>
-  getJSON<SearchResults>(`/api/search?${new URLSearchParams({ q, limit: String(limit) })}`);
+export const fetchLiveSessions = (
+  window = 30,
+  provider: ProviderScope = "all",
+): Promise<LiveSessions> =>
+  getJSON<LiveSessions>(
+    `/api/live-sessions?${new URLSearchParams({ window: String(window), provider })}`,
+  );
+
+export const fetchLiveFeed = (
+  after = 0,
+  limit = 100,
+  provider: ProviderScope = "all",
+): Promise<LiveFeed> =>
+  getJSON<LiveFeed>(
+    `/api/live-feed?${new URLSearchParams({ after: String(after), limit: String(limit), provider })}`,
+  );
+
+export const fetchSearch = (
+  q: string,
+  limit = 20,
+  provider: ProviderScope = "all",
+): Promise<SearchResults> =>
+  getJSON<SearchResults>(
+    `/api/search?${new URLSearchParams({ q, limit: String(limit), provider })}`,
+  );
 
 export const fetchSessionTranscript = (
   session: string,
   after?: number,
+  provider: ProviderScope = "all",
 ): Promise<SessionTranscript> => {
-  const params = new URLSearchParams({ session });
+  const params = new URLSearchParams({ session, provider });
   if (after !== undefined) params.set("after", String(after));
   return getJSON<SessionTranscript>(`/api/session-transcript?${params}`);
 };
@@ -277,9 +308,10 @@ export const fetchBlock = (
   session: string,
   record: number,
   index: number,
+  provider: ProviderScope = "all",
 ): Promise<BlockContent> =>
   getJSON<BlockContent>(
-    `/api/block?${new URLSearchParams({ session, record: String(record), index: String(index) })}`,
+    `/api/block?${new URLSearchParams({ session, record: String(record), index: String(index), provider })}`,
   );
 
 export interface LogBlock {
@@ -309,7 +341,7 @@ export interface LogRecord {
 
 export interface SessionLog {
   session_id: string;
-  provider: "claude" | "codex";
+  provider: Provider;
   file: string;
   offset: number;
   line: number;
@@ -318,9 +350,14 @@ export interface SessionLog {
   records: LogRecord[];
 }
 
-export const fetchSessionLog = (session: string, offset = 0, line = 0): Promise<SessionLog> =>
+export const fetchSessionLog = (
+  session: string,
+  offset = 0,
+  line = 0,
+  provider: ProviderScope = "all",
+): Promise<SessionLog> =>
   getJSON<SessionLog>(
-    `/api/session-log?${new URLSearchParams({ session, offset: String(offset), line: String(line) })}`,
+    `/api/session-log?${new URLSearchParams({ session, offset: String(offset), line: String(line), provider })}`,
   );
 
 // ---------------------------------------------------------------------------
@@ -330,7 +367,7 @@ export const fetchSessionLog = (session: string, offset = 0, line = 0): Promise<
 export interface SessionRef {
   session_id: string;
   project: string;
-  provider: "claude" | "codex";
+  provider: Provider;
   size_bytes: number;
   last_modified: string;
 }
@@ -424,25 +461,47 @@ export interface ContextTimeline {
   fraction_used: number;
 }
 
-export const fetchContextSessions = () => getJSON<SessionRef[]>("/timeline/sessions");
+export const fetchContextSessions = (provider: ProviderScope = "all") =>
+  getJSON<SessionRef[]>(`/timeline/sessions?${new URLSearchParams({ provider })}`);
 
-export const fetchContextSession = (session: string, windowTokens?: number) => {
-  const params = windowTokens !== undefined ? `?window_tokens=${windowTokens}` : "";
-  return getJSON<ContextTimeline>(`/timeline/session/${encodeURIComponent(session)}${params}`);
+export const fetchContextSession = (
+  session: string,
+  windowTokens?: number,
+  provider: ProviderScope = "all",
+) => {
+  const params = new URLSearchParams({ provider });
+  if (windowTokens !== undefined) params.set("window_tokens", String(windowTokens));
+  return getJSON<ContextTimeline>(
+    `/timeline/session/${encodeURIComponent(session)}?${params}`,
+  );
 };
 
 export const fetchContextExport = () => getJSON<ContextTimeline>("/timeline/export");
 
-export const fetchContextGrouped = (session: string) =>
-  getJSON<EventGroup[]>(`/timeline/session/${encodeURIComponent(session)}/grouped`);
+export const fetchContextGrouped = (session: string, provider: ProviderScope = "all") =>
+  getJSON<EventGroup[]>(
+    `/timeline/session/${encodeURIComponent(session)}/grouped?${new URLSearchParams({ provider })}`,
+  );
 
-export const fetchContextEvent = (session: string, index: number) =>
-  getJSON<EventInspection>(`/timeline/session/${encodeURIComponent(session)}/event/${index}`);
+export const fetchContextEvent = (
+  session: string,
+  index: number,
+  provider: ProviderScope = "all",
+) =>
+  getJSON<EventInspection>(
+    `/timeline/session/${encodeURIComponent(session)}/event/${index}?${new URLSearchParams({ provider })}`,
+  );
 
-export const fetchContextProjects = () => getJSON<ProjectRef[]>("/timeline/projects");
+export const fetchContextProjects = (provider: ProviderScope = "all") =>
+  getJSON<ProjectRef[]>(`/timeline/projects?${new URLSearchParams({ provider })}`);
 
-export const fetchContextProject = (project: string, windowTokens?: number, limit?: number) => {
-  const params = new URLSearchParams();
+export const fetchContextProject = (
+  project: string,
+  windowTokens?: number,
+  limit?: number,
+  provider: ProviderScope = "all",
+) => {
+  const params = new URLSearchParams({ provider });
   if (windowTokens !== undefined) params.set("window_tokens", String(windowTokens));
   if (limit !== undefined) params.set("limit", String(limit));
   const query = params.toString();
@@ -451,14 +510,24 @@ export const fetchContextProject = (project: string, windowTokens?: number, limi
   );
 };
 
-export const fetchContextLedger = (period: "daily" | "weekly" = "daily") =>
-  getJSON<LedgerView>(`/timeline/ledger?${new URLSearchParams({ period })}`);
+export const fetchContextLedger = (
+  period: "daily" | "weekly" = "daily",
+  provider: ProviderScope = "all",
+) =>
+  getJSON<LedgerView>(`/timeline/ledger?${new URLSearchParams({ period, provider })}`);
 
-export const contextSankeyUrl = (session: string) =>
-  `/timeline/session/${encodeURIComponent(session)}/sankey`;
+export const contextSankeyUrl = (
+  session: string,
+  provider: ProviderScope = "all",
+) =>
+  `/timeline/session/${encodeURIComponent(session)}/sankey?${new URLSearchParams({ provider })}`;
 
-export const contextInvestigationUrl = (session: string, fmt: "markdown" | "json" = "markdown") =>
-  `/timeline/session/${encodeURIComponent(session)}/investigation?${new URLSearchParams({ fmt })}`;
+export const contextInvestigationUrl = (
+  session: string,
+  fmt: "markdown" | "json" = "markdown",
+  provider: ProviderScope = "all",
+) =>
+  `/timeline/session/${encodeURIComponent(session)}/investigation?${new URLSearchParams({ fmt, provider })}`;
 
 export interface SankeyStatTile {
   label: string;
@@ -492,5 +561,10 @@ export interface SankeySessionPage {
   graphs: SankeyGraph[];
 }
 
-export const fetchContextSankeyData = (session: string) =>
-  getJSON<SankeySessionPage>(`/timeline/session/${encodeURIComponent(session)}/sankey-data`);
+export const fetchContextSankeyData = (
+  session: string,
+  provider: ProviderScope = "all",
+) =>
+  getJSON<SankeySessionPage>(
+    `/timeline/session/${encodeURIComponent(session)}/sankey-data?${new URLSearchParams({ provider })}`,
+  );
