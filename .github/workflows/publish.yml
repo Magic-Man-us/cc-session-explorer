@@ -100,7 +100,7 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: Magic-Man-us/cc-session-explorer
-          file: ./junit.xml
+          files: ./junit.xml
           disable_search: true
           report_type: test_results
           flags: python-${{ matrix.python-version }}
