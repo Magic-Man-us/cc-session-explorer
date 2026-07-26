@@ -6,7 +6,7 @@ export function Data({ data }: { data: DashboardSnapshot }) {
   const s = data.source;
   const t = data.totals;
   return (
-    <div style={{ display: "grid", gap: 14, gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)" }}>
+    <div className="cc-data-grid">
       <Card title="token accounting" meta="exact fields copied from message.usage">
         <TokenBuckets tokens={t.tokens} />
       </Card>

@@ -68,6 +68,14 @@ export function DataTable<Row>({
               <tr
                 className={classes || undefined}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
+                onKeyDown={onRowClick ? (event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onRowClick(row);
+                  }
+                } : undefined}
+                tabIndex={onRowClick ? 0 : undefined}
+                aria-selected={key === selectedKey ? true : undefined}
               >
                 {columns.map((column) => (
                   <td key={column.key} className={column.numeric ? "ju-num" : undefined}>

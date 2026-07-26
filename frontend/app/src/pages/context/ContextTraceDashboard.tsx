@@ -26,10 +26,11 @@ import {
 } from "./traceQueries";
 
 const WIDTH = 1_200;
-const HEIGHT = 330;
-const PAD_X = 52;
+const HEIGHT = 350;
+const PAD_LEFT = 92;
+const PAD_RIGHT = 28;
 const PAD_TOP = 24;
-const PAD_BOTTOM = 38;
+const PAD_BOTTOM = 58;
 const SELECTION_MINUTES = 30;
 
 const EVENT_LABELS: Record<TraceEventKind, string> = {
@@ -97,6 +98,11 @@ const fmtClock = (timestamp: string | null): string => {
   });
 };
 
+const fmtAxisTime = (timestamp: number, showDate: boolean): string =>
+  new Date(timestamp).toLocaleString([], showDate
+    ? { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }
+    : { hour: "2-digit", minute: "2-digit" });
+
 const fmtDelta = (tokens: number): string => {
   if (tokens === 0) return "no measured context change";
   return `${tokens > 0 ? "+" : "−"}${fmtTok(Math.abs(tokens))}`;
@@ -115,7 +121,7 @@ const positionEvents = (trace: ContextTrace): PositionedEvent[] => {
   const start = dated.length > 0 ? Math.min(...dated) : 0;
   const end = dated.length > 0 ? Math.max(...dated) : 0;
   const timeSpan = end - start;
-  const chartWidth = WIDTH - PAD_X * 2;
+  const chartWidth = WIDTH - PAD_LEFT - PAD_RIGHT;
   const chartHeight = HEIGHT - PAD_TOP - PAD_BOTTOM;
   const yMax = Math.max(trace.window_tokens, trace.peak_tokens, 1);
 
@@ -131,7 +137,7 @@ const positionEvents = (trace: ContextTrace): PositionedEvent[] => {
       PAD_TOP + chartHeight * (1 - Math.min(tokens / yMax, 1));
     return {
       event,
-      x: PAD_X + ratio * chartWidth,
+      x: PAD_LEFT + ratio * chartWidth,
       y: yFor(event.context_after_tokens),
       yBefore: yFor(event.context_before_tokens),
     };
@@ -189,7 +195,42 @@ function ContextLineGraph({
           .join(" L ")} L ${points[points.length - 1].x} ${HEIGHT - PAD_BOTTOM} Z`
       : "";
   const yMax = Math.max(trace.window_tokens, trace.peak_tokens, 1);
-  const grid = [0.5, 0.8, 1];
+  const windowGrid = trace.window_tokens > 0
+    ? [0, 0.5, 0.8, 1].map((fraction) => ({
+        fraction,
+        tokens: fraction * trace.window_tokens,
+      }))
+    : [0, 0.5, 1].map((fraction) => ({
+        fraction: null,
+        tokens: fraction * yMax,
+      }));
+  const yTicks = [
+    ...windowGrid,
+    ...(trace.peak_tokens > trace.window_tokens
+      ? [{ fraction: null, tokens: trace.peak_tokens }]
+      : []),
+  ].filter(
+    (tick, index, ticks) =>
+      ticks.findIndex((candidate) => candidate.tokens === tick.tokens) === index,
+  );
+  const datedPoints = points
+    .map((point) => parseMillis(point.event.timestamp))
+    .filter((timestamp): timestamp is number => timestamp !== null);
+  const startTime = parseMillis(trace.started_at) ??
+    (datedPoints.length > 0 ? Math.min(...datedPoints) : null);
+  const endTime = parseMillis(trace.ended_at) ??
+    (datedPoints.length > 0 ? Math.max(...datedPoints) : null);
+  const xTicks =
+    startTime !== null && endTime !== null
+      ? [0, 0.5, 1].map((fraction) => ({
+          fraction,
+          timestamp: startTime + (endTime - startTime) * fraction,
+        }))
+      : [];
+  const showDate =
+    startTime !== null &&
+    endTime !== null &&
+    new Date(startTime).toDateString() !== new Date(endTime).toDateString();
 
   const nearestAt = (clientX: number, target: SVGRectElement) => {
     const svg = target.ownerSVGElement;
@@ -244,8 +285,9 @@ function ContextLineGraph({
       >
         <title id="context-trace-title">Active context over the session</title>
         <desc id="context-trace-description">
-          Use the pointer to inspect the nearest activity. Click, or use arrow
-          keys and Enter, to select a thirty-minute activity window.
+          Active context tokens plotted against session time. Use the pointer
+          to inspect the nearest activity. Click, or use arrow keys and Enter,
+          to select a thirty-minute activity window.
         </desc>
         <defs>
           <linearGradient id="cc-trace-area" x1="0" x2="0" y1="0" y2="1">
@@ -254,21 +296,27 @@ function ContextLineGraph({
           </linearGradient>
         </defs>
 
-        {grid.map((fraction) => {
+        <text x={PAD_LEFT} y={14} className="cc-trace-axis-title">
+          Active context · tokens and context-window utilization
+        </text>
+
+        {yTicks.map(({ fraction, tokens }) => {
           const y =
             PAD_TOP +
-            (HEIGHT - PAD_TOP - PAD_BOTTOM) * (1 - fraction * trace.window_tokens / yMax);
+            (HEIGHT - PAD_TOP - PAD_BOTTOM) * (1 - tokens / yMax);
           return (
-            <g key={fraction}>
+            <g key={`${fraction ?? "peak"}-${tokens}`}>
               <line
-                x1={PAD_X}
-                x2={WIDTH - PAD_X}
+                x1={PAD_LEFT}
+                x2={WIDTH - PAD_RIGHT}
                 y1={y}
                 y2={y}
                 className={`cc-trace-grid${fraction === 0.8 ? " cc-trace-grid-warning" : ""}`}
               />
-              <text x={8} y={y + 4} className="cc-trace-axis-label">
-                {Math.round(fraction * 100)}%
+              <text x={PAD_LEFT - 8} y={y + 4} className="cc-trace-axis-label" textAnchor="end">
+                {fraction === null
+                  ? fmtTok(tokens)
+                  : `${Math.round(fraction * 100)}% · ${fmtTok(tokens)}`}
               </text>
             </g>
           );
@@ -311,10 +359,38 @@ function ContextLineGraph({
           />
         )}
 
+        {xTicks.map(({ fraction, timestamp }) => (
+          <g key={fraction}>
+            <line
+              x1={PAD_LEFT + fraction * (WIDTH - PAD_LEFT - PAD_RIGHT)}
+              x2={PAD_LEFT + fraction * (WIDTH - PAD_LEFT - PAD_RIGHT)}
+              y1={HEIGHT - PAD_BOTTOM}
+              y2={HEIGHT - PAD_BOTTOM + 5}
+              className="cc-trace-axis-tick"
+            />
+            <text
+              x={PAD_LEFT + fraction * (WIDTH - PAD_LEFT - PAD_RIGHT)}
+              y={HEIGHT - PAD_BOTTOM + 19}
+              className="cc-trace-axis-label"
+              textAnchor={fraction === 0 ? "start" : fraction === 1 ? "end" : "middle"}
+            >
+              {fmtAxisTime(timestamp, showDate)}
+            </text>
+          </g>
+        ))}
+        <text
+          x={(PAD_LEFT + WIDTH - PAD_RIGHT) / 2}
+          y={HEIGHT - 5}
+          className="cc-trace-axis-title"
+          textAnchor="middle"
+        >
+          Session time
+        </text>
+
         <rect
-          x={PAD_X}
+          x={PAD_LEFT}
           y={PAD_TOP}
-          width={WIDTH - PAD_X * 2}
+          width={WIDTH - PAD_LEFT - PAD_RIGHT}
           height={HEIGHT - PAD_TOP - PAD_BOTTOM}
           fill="transparent"
           className="cc-trace-hit"
@@ -457,6 +533,21 @@ function ActivityWindow({
   );
 }
 
+function TraceHeading({ provider }: { provider: string }) {
+  return (
+    <div className="cc-trace-heading">
+      <div>
+        <h2 id="context-activity-heading">Context activity</h2>
+        <p>
+          Active context reconstructed from the transcript. Hover to inspect;
+          select a point to capture 15 minutes before and after it.
+        </p>
+      </div>
+      <span className="cc-trace-provider">{provider}</span>
+    </div>
+  );
+}
+
 export function ContextTraceDashboard({ session }: { session: string }) {
   const provider = useProviderScope();
   const { data, isPending, isError, error } = useQuery(
@@ -468,12 +559,35 @@ export function ContextTraceDashboard({ session }: { session: string }) {
     setSelectedSequence(null);
   }, [session, provider]);
 
-  if (isError) return <EmptyState>{error.message}</EmptyState>;
+  if (isError) {
+    return (
+      <section className="cc-trace-dashboard" aria-labelledby="context-activity-heading">
+        <TraceHeading provider={provider} />
+        <Card title="Context growth timeline">
+          <EmptyState>{error.message}</EmptyState>
+        </Card>
+      </section>
+    );
+  }
   if (isPending || data === undefined) {
-    return <LoadingState>Reconstructing context activity…</LoadingState>;
+    return (
+      <section className="cc-trace-dashboard" aria-labelledby="context-activity-heading">
+        <TraceHeading provider={provider} />
+        <Card title="Context growth timeline">
+          <LoadingState>Reconstructing context activity…</LoadingState>
+        </Card>
+      </section>
+    );
   }
   if (data.events.length === 0) {
-    return <EmptyState>No traceable context events were captured for this session.</EmptyState>;
+    return (
+      <section className="cc-trace-dashboard" aria-labelledby="context-activity-heading">
+        <TraceHeading provider={data.provider} />
+        <Card title="Context growth timeline">
+          <EmptyState>No traceable context events were captured for this session.</EmptyState>
+        </Card>
+      </section>
+    );
   }
 
   const selected =
@@ -487,16 +601,7 @@ export function ContextTraceDashboard({ session }: { session: string }) {
 
   return (
     <section className="cc-trace-dashboard" aria-labelledby="context-activity-heading">
-      <div className="cc-trace-heading">
-        <div>
-          <h2 id="context-activity-heading">Context activity</h2>
-          <p>
-            Active context reconstructed from the transcript. Hover to inspect;
-            select a point to capture 15 minutes before and after it.
-          </p>
-        </div>
-        <span className="cc-trace-provider">{data.provider}</span>
-      </div>
+      <TraceHeading provider={data.provider} />
 
       <div className="cc-trace-kpis">
         <KpiCard

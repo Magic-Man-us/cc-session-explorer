@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Button, EmptyState, ExportButtons, KpiCard, LoadingState, Pill, SankeyChart, fmtTok } from "@cc-session/dashboard-ui";
 import {
@@ -13,6 +13,28 @@ import { toSessions, useNavigate } from "../../nav";
 import { useProviderScope } from "../../provider";
 import { ContextTraceDashboard } from "./ContextTraceDashboard";
 import { KIND_ACCENT, assignSankeyColors, groupExportColumns } from "./shared";
+
+function SectionHeader({
+  id,
+  title,
+  description,
+  actions,
+}: {
+  id: string;
+  title: string;
+  description: string;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="cc-section-heading">
+      <div>
+        <h2 id={id}>{title}</h2>
+        <p>{description}</p>
+      </div>
+      {actions && <div className="cc-section-actions">{actions}</div>}
+    </div>
+  );
+}
 
 /** Everything about one session — grouped context chains, the full raw event-by-event
  *  transcript, and the cross-links out. Its own page: `/context/sessions/:id`. */
@@ -60,28 +82,46 @@ export function ContextSessionDetail({ session }: { session: string }) {
   const sortedGroups = groups ? [...groups].sort((a, b) => b.tokens - a.tokens) : undefined;
 
   return (
-    <div style={{ display: "grid", gap: 20, padding: "4px 0" }}>
+    <div className="cc-session-detail">
       <ContextTraceDashboard session={session} />
 
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+      <nav className="cc-session-toolbar" aria-label="Session actions">
         <Button onClick={() => navigate(toSessions(session))}>View cost & usage ↗</Button>
-      </div>
+        <a
+          className="ju-button ju-button--ghost"
+          href={contextInvestigationUrl(session, "markdown", provider)}
+          download={`investigation-${session.slice(0, 12)}.md`}
+        >
+          Export Markdown
+        </a>
+        <a
+          className="ju-button ju-button--ghost"
+          href={contextInvestigationUrl(session, "json", provider)}
+          download={`investigation-${session.slice(0, 12)}.json`}
+        >
+          Export JSON
+        </a>
+      </nav>
 
-      <div>
+      <section className="cc-session-section" aria-labelledby="session-flow-heading">
+        <SectionHeader
+          id="session-flow-heading"
+          title="Session flow"
+          description="Token, cost, and tool activity move from source to outcome; ribbon width represents volume."
+          actions={
+            <a className="ju-link" href={contextSankeyUrl(session, provider)} target="_blank" rel="noreferrer">
+              Open standalone Sankey ↗
+            </a>
+          }
+        />
         {sankeyIsError && <EmptyState>{sankeyError.message}</EmptyState>}
         {sankeyPending && <LoadingState>Loading token flow…</LoadingState>}
         {sankey && (
           <>
-            <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", marginBottom: 12 }}>
+            <div className="cc-flow-kpis">
               {sankey.stats.map((s) => (
                 <KpiCard key={s.label} label={s.label} value={s.value} />
               ))}
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-              <span className="ju-muted" style={{ fontSize: 12 }}>token, cost, and tool-activity flow for this session</span>
-              <a className="ju-link" href={contextSankeyUrl(session, provider)} target="_blank" rel="noreferrer">
-                Open standalone Sankey page ↗
-              </a>
             </div>
             <div className="ju-sankey-grid">
               {sankey.graphs.map((g) => (
@@ -90,30 +130,19 @@ export function ContextSessionDetail({ session }: { session: string }) {
             </div>
           </>
         )}
-      </div>
+      </section>
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <a
-          className="ju-button ju-button--ghost"
-          href={contextInvestigationUrl(session, "markdown", provider)}
-          download={`investigation-${session.slice(0, 12)}.md`}
-        >
-          Download investigation record (Markdown)
-        </a>
-        <a
-          className="ju-button ju-button--ghost"
-          href={contextInvestigationUrl(session, "json", provider)}
-          download={`investigation-${session.slice(0, 12)}.json`}
-        >
-          Download investigation record (JSON)
-        </a>
-      </div>
-
-      <div>
-        <div className="ju-muted" style={{ fontSize: 12, marginBottom: 8, display: "flex", justifyContent: "space-between" }}>
-          <span>context chains — grouped by what filled the window, largest first</span>
-          {groups && <ExportButtons rows={groups} columns={groupExportColumns} filename={`context-chains-${session.slice(0, 12)}`} />}
-        </div>
+      <section className="cc-session-section" aria-labelledby="context-chains-heading">
+        <SectionHeader
+          id="context-chains-heading"
+          title="Context chains"
+          description="What filled the context window, grouped and ordered from largest to smallest."
+          actions={
+            groups
+              ? <ExportButtons rows={groups} columns={groupExportColumns} filename={`context-chains-${session.slice(0, 12)}`} />
+              : undefined
+          }
+        />
         {groupsIsError && <EmptyState>{groupsError.message}</EmptyState>}
         {groupsPending && <LoadingState>Loading chains…</LoadingState>}
         {sortedGroups && (
@@ -122,10 +151,12 @@ export function ContextSessionDetail({ session }: { session: string }) {
               const key = `${g.kind}:${g.label}`;
               const open = expandedGroup === key;
               return (
-                <div
+                <button
+                  type="button"
                   key={key}
                   className={open ? "ju-chain-card ju-chain-open" : "ju-chain-card"}
                   onClick={() => setExpandedGroup((prev) => (prev === key ? null : key))}
+                  aria-expanded={open}
                 >
                   <div className="ju-chain-top">
                     <Pill accent={KIND_ACCENT[g.kind]} dot={false}>{g.kind}</Pill>
@@ -146,17 +177,19 @@ export function ContextSessionDetail({ session }: { session: string }) {
                       ))}
                     </div>
                   )}
-                </div>
+                </button>
               );
             })}
           </div>
         )}
-      </div>
+      </section>
 
-      <div>
-        <div className="ju-muted" style={{ fontSize: 12, marginBottom: 6 }}>
-          full transcript — every text, thinking, tool call, and tool result, in order
-        </div>
+      <section className="cc-session-section" aria-labelledby="full-transcript-heading">
+        <SectionHeader
+          id="full-transcript-heading"
+          title="Full transcript"
+          description="Every text block, reasoning block, tool call, and tool result in chronological order."
+        />
         {transcriptIsError && <EmptyState>{transcriptError.message}</EmptyState>}
         {transcriptPending && <LoadingState>Loading transcript…</LoadingState>}
         {events && events.length === 0 && <EmptyState>No raw events captured for this session.</EmptyState>}
@@ -172,7 +205,7 @@ export function ContextSessionDetail({ session }: { session: string }) {
             {isFetchingNextPage ? "loading…" : "load more"}
           </button>
         )}
-      </div>
+      </section>
     </div>
   );
 }

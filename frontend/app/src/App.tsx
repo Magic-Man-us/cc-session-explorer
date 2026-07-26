@@ -253,8 +253,13 @@ export function App() {
                 <p className="cc-page-description">{pageDescription(page)}</p>
                 <div className="ju-muted cc-page-stamp">{stamp}</div>
               </div>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                <SegmentedControl options={PROVIDER_OPTIONS} value={provider} onChange={changeProvider} />
+              <div className="cc-page-actions">
+                <SegmentedControl
+                  options={PROVIDER_OPTIONS}
+                  value={provider}
+                  onChange={changeProvider}
+                  ariaLabel="Transcript provider"
+                />
                 <Button disabled={refreshing} onClick={refreshData}>
                   {refreshing ? "Refreshing…" : "Refresh active data"}
                 </Button>

@@ -98,6 +98,7 @@ export function FilterableTable<Row>({
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <Input
+        aria-label={filterPlaceholder}
         placeholder={filterPlaceholder}
         value={query}
         onChange={(e) => {

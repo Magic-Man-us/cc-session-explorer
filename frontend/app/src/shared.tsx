@@ -301,9 +301,25 @@ export function BucketDetailPanel({
   );
 }
 
-export function usageBarChart(data: BarDatum[], onSelect?: (id: string) => void) {
+interface UsageBarChartActions {
+  onHover?: (id: string) => void;
+  onSelect?: (id: string) => void;
+  xAxisLabel?: string;
+}
+
+export function usageBarChart(
+  data: BarDatum[],
+  actions: UsageBarChartActions = {},
+) {
   return data.length ? (
-    <BarChart data={data} series={series} onSelect={onSelect} />
+    <BarChart
+      data={data}
+      series={series}
+      xAxisLabel={actions.xAxisLabel ?? "Time bucket"}
+      yAxisLabel="Tokens"
+      onHover={actions.onHover}
+      onSelect={actions.onSelect}
+    />
   ) : (
     <EmptyState>No usage in range</EmptyState>
   );
