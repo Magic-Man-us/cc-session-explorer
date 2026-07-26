@@ -239,8 +239,8 @@ export interface DashboardSnapshot {
 
 export type Grain = "weekly" | "daily" | "hourly" | "five_minute";
 
-async function getJSON<T>(url: string): Promise<T> {
-  const response = await fetch(url, { cache: "no-store" });
+async function getJSON<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(url, { cache: "no-store", signal });
   if (!response.ok) throw new Error(`${url} request failed (${response.status})`);
   return (await response.json()) as T;
 }
@@ -461,6 +461,70 @@ export interface ContextTimeline {
   fraction_used: number;
 }
 
+export type TraceEventKind =
+  | "context_load"
+  | "prompt"
+  | "thinking"
+  | "response"
+  | "tool_call"
+  | "tool_result"
+  | "hook"
+  | "subagent"
+  | "compaction"
+  | "system"
+  | "error";
+
+export type TraceMeasurement = "exact" | "estimated" | "inferred";
+
+export interface CompactionTrace {
+  pre_tokens: number | null;
+  post_tokens: number | null;
+  dropped_tokens: number | null;
+  trigger: string | null;
+  duration_ms: number | null;
+  messages_summarized: number | null;
+  cumulative_dropped_tokens: number | null;
+  preserved_items: number | null;
+  window_number: number | null;
+}
+
+export interface ContextTraceEvent {
+  sequence: number;
+  timestamp: string | null;
+  kind: TraceEventKind;
+  context_kind: ContextEvent["kind"] | null;
+  label: string;
+  detail: string | null;
+  token_delta: number;
+  context_before_tokens: number;
+  context_after_tokens: number;
+  measurement: TraceMeasurement;
+  compaction: CompactionTrace | null;
+}
+
+export interface ContextTrace {
+  source: string;
+  provider: Provider;
+  window_tokens: number;
+  started_at: string | null;
+  ended_at: string | null;
+  events: ContextTraceEvent[];
+  peak_tokens: number;
+  final_tokens: number;
+  compaction_count: number;
+  subagent_count: number;
+}
+
+export interface ContextTraceWindow {
+  source: string;
+  provider: Provider;
+  center: string;
+  starts_at: string;
+  ends_at: string;
+  minutes: number;
+  events: ContextTraceEvent[];
+}
+
 export const fetchContextSessions = (provider: ProviderScope = "all") =>
   getJSON<SessionRef[]>(`/timeline/sessions?${new URLSearchParams({ provider })}`);
 
@@ -490,6 +554,32 @@ export const fetchContextEvent = (
 ) =>
   getJSON<EventInspection>(
     `/timeline/session/${encodeURIComponent(session)}/event/${index}?${new URLSearchParams({ provider })}`,
+  );
+
+export const fetchContextTrace = (
+  session: string,
+  provider: ProviderScope = "all",
+  signal?: AbortSignal,
+) =>
+  getJSON<ContextTrace>(
+    `/timeline/session/${encodeURIComponent(session)}/trace?${new URLSearchParams({ provider })}`,
+    signal,
+  );
+
+export const fetchContextTraceWindow = (
+  session: string,
+  center: string,
+  minutes = 30,
+  provider: ProviderScope = "all",
+  signal?: AbortSignal,
+) =>
+  getJSON<ContextTraceWindow>(
+    `/timeline/session/${encodeURIComponent(session)}/trace-window?${new URLSearchParams({
+      center,
+      minutes: String(minutes),
+      provider,
+    })}`,
+    signal,
   );
 
 export const fetchContextProjects = (provider: ProviderScope = "all") =>

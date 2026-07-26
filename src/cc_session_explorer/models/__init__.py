@@ -13,6 +13,14 @@ from .timeline import (
     SessionRef,
     SessionSummary,
 )
+from .trace import (
+    CompactionTrace,
+    ContextTrace,
+    ContextTraceEvent,
+    ContextTraceWindow,
+    TraceEventKind,
+    TraceMeasurement,
+)
 from .types import (
     DEFAULT_WINDOW_TOKENS,
     MILLION_WINDOW_TOKENS,
@@ -39,9 +47,13 @@ from .types import (
 __all__ = [
     "DEFAULT_WINDOW_TOKENS",
     "MILLION_WINDOW_TOKENS",
+    "CompactionTrace",
     "ContentCharCount",
     "ContextEvent",
     "ContextTimeline",
+    "ContextTrace",
+    "ContextTraceEvent",
+    "ContextTraceWindow",
     "EventContent",
     "EventCount",
     "EventDetail",
@@ -67,5 +79,7 @@ __all__ = [
     "SourceKind",
     "SourceLabel",
     "TokenCount",
+    "TraceEventKind",
+    "TraceMeasurement",
     "WindowTokens",
 ]

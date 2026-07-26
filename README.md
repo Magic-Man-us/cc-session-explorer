@@ -67,6 +67,26 @@ Configuration comes from `CC_SESSION_EXPLORER_*` env vars (or a `.env`):
 `CC_SESSION_EXPLORER_EXPORT_PATH` (a Claude.ai account export zip, only needed
 for the export timeline).
 
+## Context activity trace
+
+Every session opens with an interactive context trace at the top of the dashboard. The
+line shows reconstructed active-context growth over time, with markers for compactions,
+subagent activity, context loads, errors, and other lifecycle events. Hovering inspects
+the nearest event; selecting a point loads an inclusive 30-minute activity window spanning
+15 minutes before and after it, including prompts, responses, tool calls and results,
+hooks, context loads, compactions, and subagent events.
+
+Trace measurements are labeled `exact`, `estimated`, or `inferred`. Exact compaction
+metadata is used when a provider records it; text contributions use the shared token
+estimator; inferred boundaries are shown when the transcript exposes a compaction summary
+without exact before/after counts. The graph models active context, so it intentionally
+does not mix in billed usage or prompt-cache token totals.
+
+| Route | What it returns |
+| --- | --- |
+| `GET /timeline/session/{session_id}/trace` | The complete provider-normalized context trace |
+| `GET /timeline/session/{session_id}/trace-window?center=…&minutes=30` | Activity around a selected timestamp |
+
 ## MCP server
 
 Register `cc-session-explorer-mcp` in a Claude Code `.mcp.json`:
