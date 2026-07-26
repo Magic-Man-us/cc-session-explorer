@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Literal
 
 from cc_session_core import Session, build_investigation, render_investigation_markdown
@@ -12,6 +13,8 @@ from cc_session_explorer.viz import SessionPage, build_page, build_page_model
 from ..export_timeline import load_export_timeline
 from ..models import (
     ContextTimeline,
+    ContextTrace,
+    ContextTraceWindow,
     EventGroup,
     EventInspection,
     LedgerPeriod,
@@ -31,6 +34,7 @@ from ..timeline import (
     resolve_project,
     resolve_session,
 )
+from ..trace import build_context_trace, select_trace_window
 from .deps import ExportPathDep, TranscriptRootsDep, TranscriptsDbDep
 
 # Window-size query param: the context window a timeline renders against. Omitted → the adapter's
@@ -41,6 +45,18 @@ EventIndexParam = Annotated[int, Path(ge=0, description="Zero-based event positi
 ProviderParam = Annotated[
     ProviderScope,
     Query(description="Provider scope: all, claude, or codex."),
+]
+TraceCenterParam = Annotated[
+    datetime,
+    Query(description="ISO-8601 timestamp at the center of the selected activity window."),
+]
+TraceMinutesParam = Annotated[
+    int,
+    Query(
+        ge=1,
+        le=240,
+        description="Total selected window length; split evenly before and after the center.",
+    ),
 ]
 
 
@@ -68,6 +84,46 @@ def session_context_timeline(
     if path is None:
         raise HTTPException(status_code=404, detail="session not found")
     return from_transcript(path, window_tokens)
+
+
+@router.get(
+    "/timeline/session/{session_id}/trace",
+    operation_id="get_session_context_trace",
+)
+def session_context_trace(
+    session_id: str,
+    transcript_roots: TranscriptRootsDep,
+    window_tokens: WindowParam = None,
+    provider: ProviderParam = "all",
+) -> ContextTrace:
+    """Reconstruct active-context growth and lifecycle markers for one recorded session."""
+    path = resolve_session(transcript_roots.scoped(provider), session_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return build_context_trace(path, window_tokens)
+
+
+@router.get(
+    "/timeline/session/{session_id}/trace-window",
+    operation_id="get_session_context_trace_window",
+)
+def session_context_trace_window(
+    session_id: str,
+    transcript_roots: TranscriptRootsDep,
+    center: TraceCenterParam,
+    minutes: TraceMinutesParam = 30,
+    window_tokens: WindowParam = None,
+    provider: ProviderParam = "all",
+) -> ContextTraceWindow:
+    """Return all trace activity in a symmetric window around a selected timestamp."""
+    path = resolve_session(transcript_roots.scoped(provider), session_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return select_trace_window(
+        build_context_trace(path, window_tokens),
+        center,
+        minutes,
+    )
 
 
 @router.get("/timeline/session/{session_id}/sankey", response_class=HTMLResponse)

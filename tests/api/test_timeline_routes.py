@@ -56,6 +56,42 @@ def test_session_timeline_unknown_id_404(client: TestClient) -> None:
     assert client.get("/timeline/session/does-not-exist").status_code == 404
 
 
+def test_session_context_trace_reconstructs_growth(client: TestClient) -> None:
+    response = client.get("/timeline/session/sess-1/trace")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "sess-1"
+    assert body["provider"] == "claude"
+    assert body["final_tokens"] >= 0
+    assert body["events"][0]["kind"] == "prompt"
+    assert body["events"][0]["timestamp"] == "2026-07-05T12:00:00Z"
+
+
+def test_session_context_trace_window_is_centered(client: TestClient) -> None:
+    response = client.get(
+        "/timeline/session/sess-1/trace-window",
+        params={"center": "2026-07-05T12:00:00Z", "minutes": 30},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["minutes"] == 30
+    assert body["starts_at"] == "2026-07-05T11:45:00Z"
+    assert body["ends_at"] == "2026-07-05T12:15:00Z"
+    assert [event["kind"] for event in body["events"]] == ["prompt"]
+
+
+def test_session_context_trace_window_validates_minutes(client: TestClient) -> None:
+    response = client.get(
+        "/timeline/session/sess-1/trace-window",
+        params={"center": "2026-07-05T12:00:00Z", "minutes": 0},
+    )
+    assert response.status_code == 422
+
+
+def test_session_context_trace_unknown_id_404(client: TestClient) -> None:
+    assert client.get("/timeline/session/does-not-exist/trace").status_code == 404
+
+
 def test_session_event_returns_inspection(client: TestClient) -> None:
     response = client.get("/timeline/session/sess-1/event/0")
     assert response.status_code == 200

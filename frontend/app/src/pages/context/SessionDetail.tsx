@@ -11,6 +11,7 @@ import {
 import { TimelineEventRow } from "../../shared";
 import { toSessions, useNavigate } from "../../nav";
 import { useProviderScope } from "../../provider";
+import { ContextTraceDashboard } from "./ContextTraceDashboard";
 import { KIND_ACCENT, assignSankeyColors, groupExportColumns } from "./shared";
 
 /** Everything about one session — grouped context chains, the full raw event-by-event
@@ -60,6 +61,8 @@ export function ContextSessionDetail({ session }: { session: string }) {
 
   return (
     <div style={{ display: "grid", gap: 20, padding: "4px 0" }}>
+      <ContextTraceDashboard session={session} />
+
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <Button onClick={() => navigate(toSessions(session))}>View cost & usage ↗</Button>
       </div>
