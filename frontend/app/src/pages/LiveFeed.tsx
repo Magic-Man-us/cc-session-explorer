@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Card, EmptyState, Input, JsonOrText, Pagination, Pill, fmtInt, fmtTok } from "@cc-session/dashboard-ui";
+import { Button, Card, EmptyState, Input, JsonOrText, Pagination, Pill, fmtInt, fmtTok } from "@cc-session/dashboard-ui";
 import {
   fetchLiveSessions,
   fetchSessionLog,
@@ -332,6 +332,7 @@ function LogFollow({ session, info }: { session: string; info?: LiveSession }) {
         </div>
       )}
       <Input
+        aria-label="Filter live messages"
         style={{ marginBottom: 10 }}
         value={query}
         onChange={(e) => {
@@ -388,7 +389,7 @@ export function LiveFeed() {
   const now = Date.now();
 
   return (
-    <div style={{ display: "grid", gap: 14, gridTemplateColumns: "minmax(280px, 360px) 1fr" }}>
+    <div className="cc-live-grid">
       <Card title="live sessions" meta={status}>
         <div className="ju-muted" style={{ fontSize: 12, marginBottom: 8 }}>
           Active in the last {WINDOW_MIN} minutes. Click one to watch its live message feed — click
@@ -433,7 +434,13 @@ export function LiveFeed() {
             if (manual.trim()) setSelected(manual.trim());
           }}
         >
-          <Input value={manual} onChange={(e) => setManual(e.target.value)} placeholder="or paste any session id" />
+          <Input
+            aria-label="Session ID"
+            value={manual}
+            onChange={(e) => setManual(e.target.value)}
+            placeholder="Paste any session ID"
+          />
+          <Button type="submit">Open</Button>
         </form>
       </Card>
 

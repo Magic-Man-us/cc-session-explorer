@@ -44,6 +44,7 @@ export function ContextLedger() {
       ]}
       value={period}
       onChange={(v) => { setPeriod(v); setPage(0); }}
+      ariaLabel="Ledger period"
     />
   );
 

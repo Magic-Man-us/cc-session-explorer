@@ -70,13 +70,20 @@ export function Time({ data }: { data: DashboardSnapshot }) {
     <div style={{ display: "grid", gap: 14 }}>
       <Card title="time range" meta={`${fmtInt(visible.length)} buckets · ${fmtTok(filteredTokens)} tokens`}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <SegmentedControl options={GRAINS} value={grain} onChange={(v) => { setGrain(v); setPage(0); }} />
-          <div style={{ width: 220 }}>
+          <SegmentedControl
+            options={GRAINS}
+            value={grain}
+            onChange={(v) => { setGrain(v); setPage(0); }}
+            ariaLabel="Time grouping"
+          />
+          <label className="cc-time-field">
+            <span>Start</span>
             <Input type="datetime-local" value={start} onChange={(e) => { setStart(e.target.value.trim()); setPage(0); }} />
-          </div>
-          <div style={{ width: 220 }}>
+          </label>
+          <label className="cc-time-field">
+            <span>End</span>
             <Input type="datetime-local" value={end} onChange={(e) => { setEnd(e.target.value.trim()); setPage(0); }} />
-          </div>
+          </label>
           <Button onClick={() => { setStart(""); setEnd(""); setPage(0); }}>Clear</Button>
         </div>
         <div className="ju-muted" style={{ fontSize: 12, marginTop: 10 }}>
@@ -86,7 +93,10 @@ export function Time({ data }: { data: DashboardSnapshot }) {
 
       <div style={{ display: "grid", gap: 14 }}>
         <Card title={`${grain.replace("_", " ")} usage`} meta="click a bar or row">
-          {usageBarChart(bars, (bucket) => navigate(toTimeBucket(grain, bucket)))}
+          {usageBarChart(bars, {
+            onSelect: (bucket) => navigate(toTimeBucket(grain, bucket)),
+            xAxisLabel: `${grain.replace("_", " ")} bucket`,
+          })}
         </Card>
         <Card
           title="bucket table"

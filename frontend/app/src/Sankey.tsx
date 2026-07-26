@@ -27,7 +27,17 @@ export function Sankey({ data }: { data: DashboardSnapshot }) {
 
   return (
     <>
-      <svg viewBox="0 0 960 340" role="img" aria-label="Token distribution Sankey" style={{ width: "100%", minHeight: 360, display: "block" }}>
+      <div className="cc-overview-flow-direction" aria-hidden="true">
+        <span>All usage</span>
+        <span>Token category</span>
+        <span>Model</span>
+      </div>
+      <svg viewBox="0 0 960 340" role="img" aria-labelledby="overview-flow-title overview-flow-description" style={{ width: "100%", minHeight: 360, display: "block" }}>
+        <title id="overview-flow-title">Token distribution</title>
+        <desc id="overview-flow-description">
+          Left-to-right flow from all usage through token categories to the six
+          highest-volume models. Ribbon width represents token volume.
+        </desc>
         {categories.map((category) =>
           topModels.map((model) => {
             const value = model.tokens[category.key] || 0;

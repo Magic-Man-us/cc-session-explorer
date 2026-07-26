@@ -14,10 +14,21 @@ export interface KpiCardProps {
 /** Single big-number metric tile used in the KPI row. */
 export function KpiCard({ label, value, hint, onClick }: KpiCardProps) {
   const clickable = onClick !== undefined;
+  const activate = (key: string) => {
+    if (onClick !== undefined && (key === "Enter" || key === " ")) {
+      onClick();
+    }
+  };
   return (
     <div
       className={["ju-card", "ju-kpi", clickable && "ju-clickable"].filter(Boolean).join(" ")}
       onClick={onClick}
+      onKeyDown={clickable ? (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          activate(event.key);
+        }
+      } : undefined}
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
     >

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 
 export interface SankeyNode {
   id: string;
@@ -136,6 +136,8 @@ const defaultFmt = (n: number) =>
 export function SankeyChart({ graph, colors, width = 900, fmt = defaultFmt }: SankeyChartProps) {
   const [hoverNode, setHoverNode] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null);
+  const titleId = useId();
+  const descriptionId = useId();
   const L = useMemo(() => layout(graph, width), [graph, width]);
   const color = (group: string) => colors[group] ?? "var(--muted)";
 
@@ -143,13 +145,25 @@ export function SankeyChart({ graph, colors, width = 900, fmt = defaultFmt }: Sa
     <div className="ju-sankey-card">
       <div className="ju-sankey-head">
         <h3>{graph.title}</h3>
-        <span className="ju-muted">by {graph.unit}</span>
+        <span className="ju-muted">ribbon width · {graph.unit}</span>
+      </div>
+      <div className="ju-sankey-direction" aria-hidden="true">
+        <span>source</span>
+        <span>flow direction →</span>
+        <span>outcome</span>
       </div>
       <svg
         viewBox={`0 0 ${L.width} ${L.height}`}
         preserveAspectRatio="xMinYMin meet"
         className={hoverNode ? "ju-sankey-svg ju-sankey-dim" : "ju-sankey-svg"}
+        role="img"
+        aria-labelledby={`${titleId} ${descriptionId}`}
       >
+        <title id={titleId}>{graph.title}</title>
+        <desc id={descriptionId}>
+          Left-to-right flow diagram measured in {graph.unit}. Ribbon width
+          represents quantity.
+        </desc>
         <g>
           {L.links.map((l, i) => (
             <path
@@ -178,8 +192,13 @@ export function SankeyChart({ graph, colors, width = 900, fmt = defaultFmt }: Sa
             <g
               key={pn.node.id}
               className="ju-sankey-node"
+              role="group"
+              aria-label={`${pn.node.label}: ${fmt(pn.val)} ${graph.unit}`}
+              tabIndex={0}
               onMouseEnter={() => setHoverNode(pn.node.id)}
               onMouseLeave={() => setHoverNode(null)}
+              onFocus={() => setHoverNode(pn.node.id)}
+              onBlur={() => setHoverNode(null)}
             >
               <rect x={pn.x} y={pn.y} width={NODE_W} height={pn.h} rx={3} fill={color(pn.node.group)} />
               <text x={right ? pn.x + NODE_W + 7 : pn.x - 7} y={pn.y + pn.h / 2} textAnchor={right ? "start" : "end"}>

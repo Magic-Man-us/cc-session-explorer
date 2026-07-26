@@ -34,7 +34,11 @@ export function Overview({ data }: { data: DashboardSnapshot }) {
 
       <div className="cc-overview-grid cc-overview-grid--weighted">
         <Card title="tokens per day" meta="last 42 days — click a bar">
-          {usageBarChart(days, setDay)}
+          {usageBarChart(days, {
+            onHover: setDay,
+            onSelect: setDay,
+            xAxisLabel: "Day",
+          })}
           <div style={{ marginTop: 14 }}>
             <BucketDetailPanel grain="daily" bucket={day} hint="Click a day to inspect its sessions." />
           </div>
