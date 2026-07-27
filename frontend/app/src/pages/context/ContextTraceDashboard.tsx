@@ -26,11 +26,11 @@ import {
 } from "./traceQueries";
 
 const WIDTH = 1_200;
-const HEIGHT = 350;
-const PAD_LEFT = 92;
-const PAD_RIGHT = 28;
-const PAD_TOP = 24;
-const PAD_BOTTOM = 58;
+const HEIGHT = 300;
+const PAD_LEFT = 64;
+const PAD_RIGHT = 24;
+const PAD_TOP = 30;
+const PAD_BOTTOM = 42;
 const SELECTION_MINUTES = 30;
 
 const EVENT_LABELS: Record<TraceEventKind, string> = {
@@ -63,6 +63,7 @@ const EVENT_COLORS: Record<TraceEventKind, string> = {
 
 interface PositionedEvent {
   event: ContextTraceEvent;
+  time: number;
   x: number;
   y: number;
   yBefore: number;
@@ -114,29 +115,59 @@ const fmtDuration = (durationMs: number | null): string | null => {
   return `${(durationMs / 1_000).toFixed(1)} s`;
 };
 
+const niceCeiling = (value: number): number => {
+  if (value <= 0) return 1;
+  const magnitude = 10 ** Math.floor(Math.log10(value));
+  const normalized = value / magnitude;
+  const step =
+    normalized <= 1 ? 1 :
+    normalized <= 2 ? 2 :
+    normalized <= 5 ? 5 :
+    10;
+  return step * magnitude;
+};
+
+const traceYMax = (trace: ContextTrace): number =>
+  niceCeiling(Math.max(trace.window_tokens, trace.peak_tokens, 1));
+
+const normalizedEventTimes = (
+  events: ReadonlyArray<ContextTraceEvent>,
+): number[] => {
+  const parsed = events.map((event) => parseMillis(event.timestamp));
+  const firstKnown = parsed.find((value): value is number => value !== null);
+  if (firstKnown === undefined) return events.map((_, index) => index);
+
+  let previous = firstKnown;
+  return parsed.map((value) => {
+    const resolved = value === null ? previous : Math.max(previous, value);
+    previous = resolved;
+    return resolved;
+  });
+};
+
 const positionEvents = (trace: ContextTrace): PositionedEvent[] => {
   if (trace.events.length === 0) return [];
-  const timestamps = trace.events.map((event) => parseMillis(event.timestamp));
-  const dated = timestamps.filter((value): value is number => value !== null);
-  const start = dated.length > 0 ? Math.min(...dated) : 0;
-  const end = dated.length > 0 ? Math.max(...dated) : 0;
+  const timestamps = normalizedEventTimes(trace.events);
+  const start = timestamps[0];
+  const end = timestamps[timestamps.length - 1];
   const timeSpan = end - start;
   const chartWidth = WIDTH - PAD_LEFT - PAD_RIGHT;
   const chartHeight = HEIGHT - PAD_TOP - PAD_BOTTOM;
-  const yMax = Math.max(trace.window_tokens, trace.peak_tokens, 1);
+  const yMax = traceYMax(trace);
 
   return trace.events.map((event, index) => {
     const time = timestamps[index];
     const ratio =
-      time !== null && timeSpan > 0
+      timeSpan > 0
         ? (time - start) / timeSpan
         : trace.events.length === 1
           ? 0.5
           : index / (trace.events.length - 1);
     const yFor = (tokens: number) =>
-      PAD_TOP + chartHeight * (1 - Math.min(tokens / yMax, 1));
+      PAD_TOP + chartHeight * (1 - Math.min(Math.max(tokens, 0) / yMax, 1));
     return {
       event,
+      time,
       x: PAD_LEFT + ratio * chartWidth,
       y: yFor(event.context_after_tokens),
       yBefore: yFor(event.context_before_tokens),
@@ -144,34 +175,85 @@ const positionEvents = (trace: ContextTrace): PositionedEvent[] => {
   });
 };
 
-function TraceTooltip({ point }: { point: PositionedEvent }) {
+const collapseLinePoints = (
+  points: ReadonlyArray<PositionedEvent>,
+): PositionedEvent[] => {
+  const collapsed: PositionedEvent[] = [];
+  for (const point of points) {
+    const previous = collapsed[collapsed.length - 1];
+    if (previous !== undefined && Math.round(previous.x) === Math.round(point.x)) {
+      collapsed[collapsed.length - 1] = point;
+    } else {
+      collapsed.push(point);
+    }
+  }
+  return collapsed;
+};
+
+const stepPath = (points: ReadonlyArray<PositionedEvent>): string => {
+  if (points.length === 0) return "";
+  return points.slice(1).reduce(
+    (path, point) => `${path} H ${point.x} V ${point.y}`,
+    `M ${points[0].x} ${points[0].y}`,
+  );
+};
+
+const uniqueMarkers = (
+  points: ReadonlyArray<PositionedEvent>,
+): PositionedEvent[] => {
+  const markers = new Map<string, PositionedEvent>();
+  for (const point of points) {
+    if (point.event.kind !== "compaction" && point.event.kind !== "subagent") {
+      continue;
+    }
+    markers.set(`${point.event.kind}:${Math.round(point.x)}`, point);
+  }
+  return [...markers.values()];
+};
+
+function TraceInspector({
+  point,
+  windowTokens,
+}: {
+  point: PositionedEvent | null;
+  windowTokens: number;
+}) {
+  if (point === null) {
+    return (
+      <div className="cc-trace-inspector cc-trace-inspector-empty">
+        Hover the chart to inspect activity. Click a point to open its
+        surrounding 30-minute window.
+      </div>
+    );
+  }
   const { event } = point;
+  const utilization =
+    windowTokens > 0
+      ? Math.round((event.context_after_tokens / windowTokens) * 100)
+      : null;
   return (
     <div
-      className={`cc-trace-tooltip${point.y < 100 ? " cc-trace-tooltip-below" : ""}`}
-      style={{
-        left: `clamp(155px, ${(point.x / WIDTH) * 100}%, calc(100% - 155px))`,
-        top: `${Math.max((point.y / HEIGHT) * 100, 6)}%`,
-      }}
+      className="cc-trace-inspector"
       role="status"
     >
-      <div className="cc-trace-tooltip-head">
-        <span style={{ color: EVENT_COLORS[event.kind] }}>
-          {EVENT_LABELS[event.kind]}
-        </span>
-        <span>{fmtClock(event.timestamp)}</span>
-      </div>
-      <strong>{event.label}</strong>
-      <div>
-        {fmtTok(event.context_after_tokens)} active ·{" "}
-        {fmtDelta(event.token_delta)}
-      </div>
-      <div className="cc-trace-confidence">{event.measurement}</div>
+      <span
+        className="cc-trace-inspector-kind"
+        style={{ color: EVENT_COLORS[event.kind] }}
+      >
+        {EVENT_LABELS[event.kind]}
+      </span>
+      <time>{fmtTime(event.timestamp)}</time>
+      <strong title={event.label}>{event.label}</strong>
+      <span className="cc-trace-inspector-context">
+        {fmtTok(event.context_after_tokens)} active
+        {utilization !== null && ` · ${utilization}%`}
+        <small>{fmtDelta(event.token_delta)} · {event.measurement}</small>
+      </span>
     </div>
   );
 }
 
-function ContextLineGraph({
+export function ContextLineGraph({
   trace,
   selectedSequence,
   onSelect,
@@ -181,57 +263,38 @@ function ContextLineGraph({
   onSelect: (event: ContextTraceEvent) => void;
 }) {
   const points = useMemo(() => positionEvents(trace), [trace]);
+  const linePoints = useMemo(() => collapseLinePoints(points), [points]);
+  const markers = useMemo(() => uniqueMarkers(points), [points]);
   const [hoveredSequence, setHoveredSequence] = useState<number | null>(null);
   const hovered =
     points.find((point) => point.event.sequence === hoveredSequence) ?? null;
   const selected =
     points.find((point) => point.event.sequence === selectedSequence) ?? null;
   const inspected = hovered ?? selected;
-  const line = points.map((point) => `${point.x},${point.y}`).join(" ");
-  const area =
-    points.length > 0
-      ? `M ${points[0].x} ${HEIGHT - PAD_BOTTOM} L ${points
-          .map((point) => `${point.x} ${point.y}`)
-          .join(" L ")} L ${points[points.length - 1].x} ${HEIGHT - PAD_BOTTOM} Z`
-      : "";
-  const yMax = Math.max(trace.window_tokens, trace.peak_tokens, 1);
-  const windowGrid = trace.window_tokens > 0
-    ? [0, 0.5, 0.8, 1].map((fraction) => ({
-        fraction,
-        tokens: fraction * trace.window_tokens,
-      }))
-    : [0, 0.5, 1].map((fraction) => ({
-        fraction: null,
-        tokens: fraction * yMax,
-      }));
-  const yTicks = [
-    ...windowGrid,
-    ...(trace.peak_tokens > trace.window_tokens
-      ? [{ fraction: null, tokens: trace.peak_tokens }]
-      : []),
-  ].filter(
-    (tick, index, ticks) =>
-      ticks.findIndex((candidate) => candidate.tokens === tick.tokens) === index,
+  const line = stepPath(linePoints);
+  const yMax = traceYMax(trace);
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((fraction) => ({
+    fraction,
+    tokens: fraction * yMax,
+  }));
+  const hasRecordedTime = trace.events.some(
+    (event) => parseMillis(event.timestamp) !== null,
   );
-  const datedPoints = points
-    .map((point) => parseMillis(point.event.timestamp))
-    .filter((timestamp): timestamp is number => timestamp !== null);
-  const startTime = parseMillis(trace.started_at) ??
-    (datedPoints.length > 0 ? Math.min(...datedPoints) : null);
-  const endTime = parseMillis(trace.ended_at) ??
-    (datedPoints.length > 0 ? Math.max(...datedPoints) : null);
+  const startTime = hasRecordedTime ? points[0]?.time ?? null : null;
+  const endTime = hasRecordedTime ? points[points.length - 1]?.time ?? null : null;
   const xTicks =
     startTime !== null && endTime !== null
-      ? [0, 0.5, 1].map((fraction) => ({
+      ? (startTime === endTime ? [0.5] : [0, 0.5, 1]).map((fraction) => ({
           fraction,
-          timestamp: startTime + (endTime - startTime) * fraction,
+          label: fmtAxisTime(
+            startTime + (endTime - startTime) * fraction,
+            new Date(startTime).toDateString() !== new Date(endTime).toDateString(),
+          ),
         }))
-      : [];
-  const showDate =
-    startTime !== null &&
-    endTime !== null &&
-    new Date(startTime).toDateString() !== new Date(endTime).toDateString();
-
+      : [0, 0.5, 1].map((fraction) => ({
+          fraction,
+          label: fraction === 0 ? "start" : fraction === 1 ? "end" : "middle",
+        }));
   const nearestAt = (clientX: number, target: SVGRectElement) => {
     const svg = target.ownerSVGElement;
     if (svg === null || points.length === 0) return null;
@@ -274,132 +337,190 @@ function ContextLineGraph({
   };
 
   return (
-    <div className="cc-trace-chart-wrap">
-      <svg
-        className="cc-trace-chart"
-        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        role="img"
-        aria-labelledby="context-trace-title context-trace-description"
-        tabIndex={0}
-        onKeyDown={keyDown}
-      >
-        <title id="context-trace-title">Active context over the session</title>
-        <desc id="context-trace-description">
-          Active context tokens plotted against session time. Use the pointer
-          to inspect the nearest activity. Click, or use arrow keys and Enter,
-          to select a thirty-minute activity window.
-        </desc>
-        <defs>
-          <linearGradient id="cc-trace-area" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#5eb6f2" stopOpacity="0.32" />
-            <stop offset="100%" stopColor="#5eb6f2" stopOpacity="0.02" />
-          </linearGradient>
-        </defs>
+    <div className="cc-trace-chart-shell">
+      <div className="cc-trace-chart-scroll">
+        <svg
+          className="cc-trace-chart"
+          viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+          role="img"
+          aria-labelledby="context-trace-title context-trace-description"
+          tabIndex={0}
+          onKeyDown={keyDown}
+        >
+          <title id="context-trace-title">Active context over the session</title>
+          <desc id="context-trace-description">
+            Active context tokens plotted against session time. Use the pointer
+            to inspect the nearest activity. Click, or use arrow keys and Enter,
+            to select a thirty-minute activity window.
+          </desc>
 
-        <text x={PAD_LEFT} y={14} className="cc-trace-axis-title">
-          Active context · tokens and context-window utilization
-        </text>
+          {yTicks.map(({ fraction, tokens }) => {
+            const y =
+              PAD_TOP +
+              (HEIGHT - PAD_TOP - PAD_BOTTOM) * (1 - fraction);
+            return (
+              <g key={fraction}>
+                <line
+                  x1={PAD_LEFT}
+                  x2={WIDTH - PAD_RIGHT}
+                  y1={y}
+                  y2={y}
+                  className="cc-trace-grid"
+                />
+                <text
+                  x={PAD_LEFT - 9}
+                  y={y + 4}
+                  className="cc-trace-axis-label"
+                  textAnchor="end"
+                >
+                  {fmtTok(tokens)}
+                </text>
+              </g>
+            );
+          })}
 
-        {yTicks.map(({ fraction, tokens }) => {
-          const y =
-            PAD_TOP +
-            (HEIGHT - PAD_TOP - PAD_BOTTOM) * (1 - tokens / yMax);
-          return (
-            <g key={`${fraction ?? "peak"}-${tokens}`}>
+          {trace.window_tokens > 0 && trace.window_tokens < yMax && (
+            <g>
               <line
                 x1={PAD_LEFT}
                 x2={WIDTH - PAD_RIGHT}
-                y1={y}
-                y2={y}
-                className={`cc-trace-grid${fraction === 0.8 ? " cc-trace-grid-warning" : ""}`}
+                y1={PAD_TOP + (HEIGHT - PAD_TOP - PAD_BOTTOM) * (1 - trace.window_tokens / yMax)}
+                y2={PAD_TOP + (HEIGHT - PAD_TOP - PAD_BOTTOM) * (1 - trace.window_tokens / yMax)}
+                className="cc-trace-window-limit"
               />
-              <text x={PAD_LEFT - 8} y={y + 4} className="cc-trace-axis-label" textAnchor="end">
-                {fraction === null
-                  ? fmtTok(tokens)
-                  : `${Math.round(fraction * 100)}% · ${fmtTok(tokens)}`}
-              </text>
             </g>
-          );
-        })}
+          )}
 
-        {area && <path d={area} fill="url(#cc-trace-area)" />}
-        {line && <polyline points={line} className="cc-trace-line" />}
+          <line
+            x1={PAD_LEFT}
+            x2={WIDTH - PAD_RIGHT}
+            y1={PAD_TOP}
+            y2={PAD_TOP}
+            className="cc-trace-event-rail"
+          />
 
-        {points.map((point) => {
-          const isCompaction = point.event.kind === "compaction";
-          const isSubagent = point.event.kind === "subagent";
-          if (!isCompaction && !isSubagent) return null;
-          return (
-            <g key={point.event.sequence}>
+          {line && <path d={line} className="cc-trace-line" />}
+
+          {markers.map((point) =>
+            point.event.kind === "compaction" ? (
+              <g key={`compaction-${point.event.sequence}`}>
+                <line
+                  x1={point.x}
+                  x2={point.x}
+                  y1={point.yBefore}
+                  y2={point.y}
+                  className="cc-trace-compaction-drop"
+                />
+                <circle
+                  cx={point.x}
+                  cy={point.y}
+                  r={5}
+                  className="cc-trace-compaction-dot"
+                />
+              </g>
+            ) : (
+              <path
+                key={`subagent-${point.event.sequence}`}
+                d={`M ${point.x} ${PAD_TOP + 2} l -5 -9 h 10 Z`}
+                className="cc-trace-subagent-marker"
+              />
+            ),
+          )}
+
+          {selected && (
+            <>
               <line
-                x1={point.x}
-                x2={point.x}
-                y1={isCompaction ? point.yBefore : PAD_TOP}
-                y2={isCompaction ? point.y : HEIGHT - PAD_BOTTOM}
-                className={`cc-trace-marker-line cc-trace-marker-${point.event.kind}`}
+                x1={selected.x}
+                x2={selected.x}
+                y1={PAD_TOP}
+                y2={HEIGHT - PAD_BOTTOM}
+                className="cc-trace-selection"
               />
               <circle
-                cx={point.x}
-                cy={point.y}
-                r={isCompaction ? 6 : 5}
-                fill={EVENT_COLORS[point.event.kind]}
-                className="cc-trace-marker-dot"
+                cx={selected.x}
+                cy={selected.y}
+                r={4}
+                className="cc-trace-selection-dot"
               />
+            </>
+          )}
+          {hovered && (
+            <>
+              <line
+                x1={hovered.x}
+                x2={hovered.x}
+                y1={PAD_TOP}
+                y2={HEIGHT - PAD_BOTTOM}
+                className="cc-trace-cursor"
+              />
+              <circle
+                cx={hovered.x}
+                cy={hovered.y}
+                r={4}
+                className="cc-trace-cursor-dot"
+              />
+            </>
+          )}
+
+          {xTicks.map(({ fraction, label }) => (
+            <g key={fraction}>
+              <line
+                x1={PAD_LEFT + fraction * (WIDTH - PAD_LEFT - PAD_RIGHT)}
+                x2={PAD_LEFT + fraction * (WIDTH - PAD_LEFT - PAD_RIGHT)}
+                y1={HEIGHT - PAD_BOTTOM}
+                y2={HEIGHT - PAD_BOTTOM + 5}
+                className="cc-trace-axis-tick"
+              />
+              <text
+                x={PAD_LEFT + fraction * (WIDTH - PAD_LEFT - PAD_RIGHT)}
+                y={HEIGHT - PAD_BOTTOM + 18}
+                className="cc-trace-axis-label"
+                textAnchor={fraction === 0 ? "start" : fraction === 1 ? "end" : "middle"}
+              >
+                {label}
+              </text>
             </g>
-          );
-        })}
-
-        {selected && (
-          <line
-            x1={selected.x}
-            x2={selected.x}
-            y1={PAD_TOP}
-            y2={HEIGHT - PAD_BOTTOM}
-            className="cc-trace-selection"
-          />
-        )}
-
-        {xTicks.map(({ fraction, timestamp }) => (
-          <g key={fraction}>
-            <line
-              x1={PAD_LEFT + fraction * (WIDTH - PAD_LEFT - PAD_RIGHT)}
-              x2={PAD_LEFT + fraction * (WIDTH - PAD_LEFT - PAD_RIGHT)}
-              y1={HEIGHT - PAD_BOTTOM}
-              y2={HEIGHT - PAD_BOTTOM + 5}
-              className="cc-trace-axis-tick"
-            />
+          ))}
+          <text
+            x={PAD_LEFT}
+            y={14}
+            className="cc-trace-axis-title"
+          >
+            Active context · tokens
+          </text>
+          {trace.window_tokens > 0 && (
             <text
-              x={PAD_LEFT + fraction * (WIDTH - PAD_LEFT - PAD_RIGHT)}
-              y={HEIGHT - PAD_BOTTOM + 19}
-              className="cc-trace-axis-label"
-              textAnchor={fraction === 0 ? "start" : fraction === 1 ? "end" : "middle"}
+              x={WIDTH - PAD_RIGHT}
+              y={14}
+              className="cc-trace-limit-label"
+              textAnchor="end"
             >
-              {fmtAxisTime(timestamp, showDate)}
+              context limit · {fmtTok(trace.window_tokens)}
             </text>
-          </g>
-        ))}
-        <text
-          x={(PAD_LEFT + WIDTH - PAD_RIGHT) / 2}
-          y={HEIGHT - 5}
-          className="cc-trace-axis-title"
-          textAnchor="middle"
-        >
-          Session time
-        </text>
+          )}
+          <text
+            x={(PAD_LEFT + WIDTH - PAD_RIGHT) / 2}
+            y={HEIGHT - 4}
+            className="cc-trace-axis-title"
+            textAnchor="middle"
+          >
+            {hasRecordedTime ? "Session time" : "Event order"}
+          </text>
 
-        <rect
-          x={PAD_LEFT}
-          y={PAD_TOP}
-          width={WIDTH - PAD_LEFT - PAD_RIGHT}
-          height={HEIGHT - PAD_TOP - PAD_BOTTOM}
-          fill="transparent"
-          className="cc-trace-hit"
-          onPointerMove={move}
-          onPointerLeave={() => setHoveredSequence(null)}
-          onPointerDown={click}
-        />
-      </svg>
-      {inspected && <TraceTooltip point={inspected} />}
+          <rect
+            x={PAD_LEFT}
+            y={PAD_TOP}
+            width={WIDTH - PAD_LEFT - PAD_RIGHT}
+            height={HEIGHT - PAD_TOP - PAD_BOTTOM}
+            fill="transparent"
+            className="cc-trace-hit"
+            onPointerMove={move}
+            onPointerLeave={() => setHoveredSequence(null)}
+            onClick={click}
+          />
+        </svg>
+      </div>
+      <TraceInspector point={inspected} windowTokens={trace.window_tokens} />
     </div>
   );
 }
